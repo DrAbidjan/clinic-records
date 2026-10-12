@@ -510,7 +510,7 @@ function mhStatus(p){
 /* ---------- screens ---------- */
 function render(){
   const app=$('#app');const s=view.screen;
-  const v={config:configView,offline:offlineView,loading:loadingView,error:errorView,auth:authView,newpw:newpwView,onboard:onboardView,list:listView,appts:apptsView,settings:settingsView,patient:patientView}[s]||loadingView;
+  const v={config:configView,offline:offlineView,loading:loadingView,error:errorView,auth:authView,newpw:newpwView,onboard:onboardView,recovery:recoveryView,list:listView,appts:apptsView,settings:settingsView,patient:patientView}[s]||loadingView;
   app.innerHTML=v();
 }
 const msgHtml=()=>view.msg?`<div class="msg ${view.msg.t}" role="alert">${esc(view.msg.m)}</div>`:'';
@@ -530,8 +530,14 @@ function authView(){
     <button class="btn primary" type="submit">Log in</button>
     ${LOCAL?`<button class="linkbtn" type="button" data-act="showUsers">${view.showUsers?'Hide usernames':'Forgot your username?'}</button>
     ${view.showUsers?`<div class="summary">${window.__LOCAL_DB.usernames().map(u=>`<span><b>${esc(u.username)}</b>${u.name?' · '+esc(u.name):''}</span>`).join('')}</div>`:''}
-    <p class="small muted" style="margin:0">Forgot your password? Your clinic admin can reset it in Clinic & account → Team.</p>`:'<button class="linkbtn" type="button" data-act="forgot">Forgot password?</button>'}
-  </form>`:`<form class="panel" id="signupForm" novalidate>
+    <p class="small muted" style="margin:0">Forgot your password? Your clinic admin can reset it in Clinic & account → Team.</p>
+    <button class="linkbtn" type="button" data-act="showRecover">${view.showRecover?'Hide':'Admin forgot password?'}</button>`:'<button class="linkbtn" type="button" data-act="forgot">Forgot password?</button>'}
+  </form>
+  ${LOCAL&&view.showRecover?`<form class="panel" id="recoverForm" novalidate><h3>Reset admin password</h3>
+    <label class="f"><span>Admin username</span><input type="text" id="rv-user" autocapitalize="off" autocorrect="off" value="${esc(view.email||'')}" required></label>
+    <label class="f"><span>Recovery code</span><input type="text" id="rv-code" class="codein" autocapitalize="characters" autocomplete="off" placeholder="XXXX-XXXX-XXXX" value="${esc(view.rvCode||'')}" required></label>
+    <label class="f"><span>New password (at least 8 characters)</span><input type="password" id="rv-pw" autocomplete="new-password" minlength="8" required></label>
+    <button class="btn primary" type="submit">Set new password</button></form>`:''}`:`<form class="panel" id="signupForm" novalidate>
     <label class="f"><span>Your name (as shown on records)</span><input type="text" id="su-name" placeholder="e.g. Dr Ayesha Khan" autocomplete="name" required></label>
     <label class="f"><span>${LOCAL?'Choose a username (for logging in)':'Email'}</span><input type="${LOCAL?'text':'email'}" id="su-email" autocomplete="username" autocapitalize="off" autocorrect="off" ${LOCAL?'placeholder="e.g. ayesha"':'inputmode="email"'} required></label>
     <label class="f"><span>Password (at least 8 characters)</span><input type="password" id="su-pw" autocomplete="new-password" minlength="8" required></label>
@@ -612,6 +618,7 @@ function settingsView(){
     ${admin?'<div class="row"><button class="btn primary" type="submit">Save clinic details</button></div>':'<p class="small muted" style="margin:0">Only a clinic admin can change these.</p>'}
   </form>
   ${LOCAL?addDentistHtml(admin):''}
+  ${LOCAL&&admin?recoveryPanel():''}
   <section class="panel" ${LOCAL?'hidden':''}>
     <h3>Invite dentists</h3>
     ${admin?`<p class="small muted" style="margin:0">Send this code to a dentist. They create an account, choose “Join a clinic” and enter it.</p>
@@ -665,14 +672,33 @@ function settingsView(){
   </section>`;
 }
 
+function recoveryView(){
+  return `<div class="auth">${brand()}
+  <section class="panel"><h2>Save your recovery code</h2>
+    <p style="margin:0">If you ever forget the admin password, this code lets you set a new one. Without it, a forgotten admin password cannot be reset.</p>
+    <div class="row" style="justify-content:center"><span class="invite" id="rcode">${esc(view.recoveryCode)}</span></div>
+    <p class="small muted" style="margin:0">Write it on paper and keep it in the clinic, or take a screenshot and keep it in a private place. It is shown only now. You can make a new one later in Clinic & account.</p>
+    <label class="row small" style="gap:10px"><input type="checkbox" id="rc-ok" style="width:22px;height:22px"> I have saved the recovery code</label>
+    <button class="btn primary" data-act="rcDone">Continue</button>
+  </section></div>`;
+}
 function deviceBanner(){
   if(!LOCAL)return '';
   const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
   const standalone=navigator.standalone||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
   const last=+lsGet('lastFullBackup')||0,old=!last||Date.now()-last>7*864e5;let h='';
   if(ios&&!standalone)h+=`<div class="msg warn">Add this app to your Home Screen (Share → Add to Home Screen) and always open it from there. Safari and the Home Screen app keep separate records, and Safari can delete records of a site you don't open for 7 days.</div>`;
+  if(isAdmin()&&!clinic.has_recovery)h+=`<div class="msg warn">Set up an admin recovery code, so a forgotten admin password can be reset. <button class="linkbtn" data-act="settings">Set it up</button></div>`;
   if(old&&db.patients.length)h+=`<div class="msg warn">${last?'Your last full backup was more than a week ago.':'You have no backup yet.'} Records are only on this device. <button class="linkbtn" data-act="settings">Save a backup</button></div>`;
   return h;
+}
+function recoveryPanel(){
+  return `<section class="panel"><h3>Admin recovery code</h3>
+    <p class="small muted" style="margin:0">Resets a forgotten admin password from the login screen. ${clinic.has_recovery?'A code is set. Making a new one stops the old one.':'<b style="color:var(--warn)">No code yet.</b>'}</p>
+    ${view.newRecovery?`<div class="row" style="justify-content:center"><span class="invite">${esc(view.newRecovery)}</span></div><p class="small" style="margin:0">Write this down or take a screenshot now. It won't be shown again.</p>`:
+    view.confirm==='newrc'?`<div class="row"><button class="btn small" data-act="cancelConfirm">Cancel</button><button class="btn small primary" data-act="makeRecovery">Yes, make a new code</button></div>`:
+    `<div class="row"><button class="btn ${clinic.has_recovery?'':'primary'}" data-act="${clinic.has_recovery?'askRecovery':'makeRecovery'}">${clinic.has_recovery?'Make a new recovery code':'Create recovery code'}</button></div>`}
+  </section>`;
 }
 function addDentistHtml(admin){
   if(!admin)return `<section class="panel"><h3>Dentists</h3><p class="small muted" style="margin:0">Your clinic admin adds dentists and resets passwords.</p></section>`;
@@ -917,12 +943,18 @@ document.addEventListener('submit',async e=>{
     if(f.id==='createForm'){
       if(!v('cc-name'))throw new Error('Enter the clinic name.');
       const {data,error}=await sb.rpc('create_clinic',{p_name:v('cc-name'),p_address:v('cc-address'),p_phone:v('cc-phone'),p_my_name:v('cc-me')});if(error)throw error;
-      toast('Clinic created');await afterLogin(data);return;
+      let rc=null;if(LOCAL){const r=await sb.rpc('new_recovery_code',{p_clinic:data});rc=r.data}
+      await afterLogin(data);if(rc){view.recoveryCode=rc;view.screen='recovery';render()}else toast('Clinic created');return;
     }
     if(f.id==='joinForm'){
       if(!v('jc-code'))throw new Error('Enter the invite code.');
       const {data,error}=await sb.rpc('join_clinic',{p_code:v('jc-code'),p_my_name:v('jc-me')});if(error)throw error;
       toast('You joined the clinic');await afterLogin(data);return;
+    }
+    if(f.id==='recoverForm'){
+      view.email=v('rv-user');view.rvCode=v('rv-code');
+      await window.__LOCAL_DB.recover(v('rv-user'),v('rv-code'),$('#rv-pw').value);
+      view.email=v('rv-user').toLowerCase();view.rvCode='';view.showRecover=false;view.msg={t:'ok',m:'Password changed. Log in with your new password.'};render();return;
     }
     if(f.id==='addDentistForm'){
       const {error}=await sb.rpc('add_dentist',{p_clinic:clinic.id,p_name:v('ad-name'),p_username:v('ad-user'),p_password:$('#ad-pw').value,p_role:$('#ad-role').value});if(error)throw error;
@@ -997,6 +1029,11 @@ document.addEventListener('click',async e=>{
   if(d.rm){const {error}=await sb.from('members').delete().eq('clinic_id',clinic.id).eq('user_id',d.rm);if(error){toast(friendly(error));return}view.confirm=null;await loadTeam();render();toast('Removed from the clinic');return}
   switch(d.act){
     case 'reload':location.reload();break;
+    case 'showRecover':view.email=$('#li-email')?$('#li-email').value:'';view.showRecover=!view.showRecover;view.msg=null;render();break;
+    case 'rcDone':if(!$('#rc-ok').checked){toast('Tick the box once you have saved the code');break;}view.recoveryCode=null;clinic.has_recovery=true;view.screen='list';render();toast('Clinic created');break;
+    case 'askRecovery':view.confirm='newrc';render();break;
+    case 'makeRecovery':{const {data,error}=await sb.rpc('new_recovery_code',{p_clinic:clinic.id});if(error){toast(friendly(error));break;}
+      view.newRecovery=data;view.confirm=null;clinic.has_recovery=true;const m=memberships.find(x=>x.clinic_id===clinic.id);if(m)m.clinics.has_recovery=true;render();break;}
     case 'showUsers':view.email=$('#li-email')?$('#li-email').value:'';view.showUsers=!view.showUsers;render();break;
     case 'fullBackup':{view.backupBusy=true;render();try{const data=await window.__LOCAL_DB.exportAll();view.backupBlob=new Blob([JSON.stringify(data)],{type:'application/json'});}catch(err){toast('Could not prepare the backup')}view.backupBusy=false;render();break;}
     case 'shareBackup':{const bl=view.backupBlob;if(!bl)break;deliverFile(bl,('Full_Backup_'+clinic.name+'_'+today()+'.json').replace(/[^\w.\-]+/g,'_'),'save').then(ok=>{if(ok){lsSet('lastFullBackup',String(Date.now()));view.backupBlob=null;toast('Backup saved – keep it in iCloud Drive or Google Drive');render()}},()=>toast('Could not save the backup'));break;}
@@ -1018,7 +1055,7 @@ document.addEventListener('click',async e=>{
       view.msg=error?{t:'err',m:friendly(error)}:{t:'ok',m:'If that email has an account, a reset link is on its way. Open it on this device.'};render();break;}
     case 'back':if(view.screen==='patient'&&view.backTo==='appts'){view=Object.assign(view,{screen:'appts',pid:null,confirm:null});render();refreshAppts();break;}
       view=Object.assign(view,{screen:memberships.length?'list':'onboard',pid:null,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();break;
-    case 'settings':view.screen='settings';view.confirm=null;view.msg=null;render();loadTeam().then(()=>{if(view.screen==='settings')softRender()});break;
+    case 'settings':view.newRecovery=null;view.screen='settings';view.confirm=null;view.msg=null;render();loadTeam().then(()=>{if(view.screen==='settings')softRender()});break;
     case 'onboard':view.screen='onboard';view.msg=null;render();break;
     case 'newPatient':{const np=blankPatient();db.patients.push(np);markDirty(np.id);view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
     case 'example':{const np=sample();np.notes[0].by=me.name;db.patients.push(np);markDirty(np.id);render();toast('Example patient added');break;}

@@ -83,6 +83,7 @@ function query(table){
       if(op==='select'){
         let out=T[table].filter(m).map(r=>Object.assign({},r));
         if(table==='members'&&/clinics\(/.test(sel))out=out.map(r=>{const c=T.clinics.find(x=>x.id===r.clinic_id);r.clinics=c?Object.assign({},c):null;return r});
+        out=out.map(r=>{const c=table==='clinics'?r:r.clinics;if(c){c.has_recovery=!!c.recovery;delete c.recovery}return r});
         if(ord)out.sort((a,b)=>(a[ord.c]>b[ord.c]?1:a[ord.c]<b[ord.c]?-1:0)*(ord.asc?1:-1));
         if(rng)out=out.slice(rng[0],rng[1]+1);if(lim)out=out.slice(0,lim);
         if(single)return out[0]?{data:clone(out[0]),error:null}:{data:null,error:err('Not found')};
@@ -126,12 +127,28 @@ async function rpc(name,a){
       if(T.users.some(u=>u.username===un))throw err('That username is already taken.');if(String(a.p_password||'').length<8)throw err('Password must be at least 8 characters.');
       const u=await makeUser(un,a.p_password,{full_name:a.p_name});
       T.members.push({clinic_id:a.p_clinic,user_id:u.id,name:String(a.p_name||'').trim()||un,role:a.p_role==='admin'?'admin':'dentist',joined_at:now()});await saveT('members');return{data:u.id,error:null}}
+    case 'new_recovery_code':{needAdmin(a.p_clinic);const c=T.clinics.find(x=>x.id===a.p_clinic);
+      const raw=code()+code().slice(0,2);const pretty=raw.slice(0,4)+'-'+raw.slice(4,8)+'-'+raw.slice(8,12);
+      const salt=hex(crypto.getRandomValues(new Uint8Array(16)));c.recovery={salt,hash:await hash(raw,salt)};await saveT('clinics');return{data:pretty,error:null}}
     case 'admin_reset_password':{needAdmin(a.p_clinic);if(!T.members.some(m=>m.clinic_id===a.p_clinic&&m.user_id===a.p_user))throw err('Not in this clinic');
       if(String(a.p_password||'').length<8)throw err('Password must be at least 8 characters.');
       const u=T.users.find(x=>x.id===a.p_user);u.salt=hex(crypto.getRandomValues(new Uint8Array(16)));u.hash=await hash(a.p_password,u.salt);await saveT('users');return{data:null,error:null}}
   }throw err('Unknown action')}catch(e){return{data:null,error:e&&e.message?e:err(String(e))}}
 }
 
+let recoverFails=0,recoverWait=0;
+async function recover(username,codeIn,newpw){
+  await ready;
+  if(Date.now()<recoverWait)throw err('Too many wrong tries. Wait one minute and try again.');
+  const raw=String(codeIn||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const u=T.users.find(x=>x.username===norm(username));
+  if(String(newpw||'').length<8)throw err('New password must be at least 8 characters.');
+  let ok=false;
+  if(u&&raw.length===12){for(const c of T.clinics){if(!c.recovery)continue;
+    if(await hash(raw,c.recovery.salt)===c.recovery.hash&&T.members.some(m=>m.clinic_id===c.id&&m.user_id===u.id&&m.role==='admin')){ok=true;break}}}
+  if(!ok){recoverFails++;if(recoverFails>=5){recoverWait=Date.now()+60000;recoverFails=0}throw err('Username or recovery code is wrong. The code only works for an admin of that clinic.')}
+  recoverFails=0;u.salt=hex(crypto.getRandomValues(new Uint8Array(16)));u.hash=await hash(newpw,u.salt);await saveT('users');
+}
 const auth={
   getSession:async()=>{await ready;return{data:{session:clone(session)},error:null}},
   onAuthStateChange(fn){listeners.push(fn);return{data:{subscription:{unsubscribe(){}}}}},
@@ -174,7 +191,7 @@ async function importAll(obj){
   await setSession(null);
 }
 
-window.__LOCAL_DB={ready,userCount:()=>T.users.length,usernames:()=>T.users.map(u=>{const m=T.members.find(x=>x.user_id===u.id);return{username:u.username,name:(m&&m.name)||(u.meta&&u.meta.full_name)||''}}),exportAll,importAll};
+window.__LOCAL_DB={ready,userCount:()=>T.users.length,recover,usernames:()=>T.users.map(u=>{const m=T.members.find(x=>x.user_id===u.id);return{username:u.username,name:(m&&m.name)||(u.meta&&u.meta.full_name)||''}}),exportAll,importAll};
 window.supabase={createClient(){return{
   auth,from:query,rpc,storage,
   channel(){const c={on(){return c},subscribe(){return c}};return c},removeChannel(){}
