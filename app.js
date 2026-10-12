@@ -1,13 +1,8 @@
 (function(){
-/* ============================================================
-   SETUP: paste your two Supabase values here (see the guide).
-   Supabase → Project Settings → API → "Project URL" and "anon public" key.
-   The anon key is meant to be public; the database rules keep each clinic's data private.
-   ============================================================ */
-const CONFIG={
-  SUPABASE_URL:'PASTE_PROJECT_URL_HERE',
-  SUPABASE_ANON_KEY:'PASTE_ANON_KEY_HERE'
-};
+/* Clinic Patient Records – one-device version.
+   Everything is stored on this phone or computer (see local-db.js). Nothing to configure. */
+const CONFIG={SUPABASE_URL:'https://local.device',SUPABASE_ANON_KEY:'on-device-storage-no-key-needed'};
+const LOCAL=!!window.__LOCAL_DB;
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -142,8 +137,9 @@ const isAdmin=()=>me&&me.role==='admin';
 const nameOf=id=>{const m=team.find(t=>t.user_id===id);return m?m.name:'another device'};
 function friendly(err){
   const m=(err&&(err.message||err.error_description))||String(err||'Something went wrong');
-  if(/Invalid login credentials/i.test(m))return 'Email or password is wrong.';
+  if(/Invalid login credentials/i.test(m))return LOCAL?'Username or password is wrong.':'Email or password is wrong.';
   if(/already registered|already exists/i.test(m))return 'An account with this email already exists. Log in instead.';
+  if(/Invalid login credentials/i.test(m)&&LOCAL)return 'Username or password is wrong.';
   if(/Email not confirmed/i.test(m))return 'Please confirm your email first (check your inbox), then log in.';
   if(/Failed to fetch|NetworkError|Load failed/i.test(m))return 'No internet connection. Check your connection and try again.';
   if(/Password should be/i.test(m))return 'Password must be at least 8 characters.';
@@ -153,7 +149,7 @@ function friendly(err){
 /* ---------- sync ---------- */
 const dirty=new Set();let flushT=null,syncState='saved';
 function setSync(s){syncState=s;const el=$('#sync');if(el){el.className='sync '+s;el.textContent=syncText()}}
-function syncText(){return {saved:'All changes saved',saving:'Saving…',error:'Not saved – check internet'}[syncState]}
+function syncText(){return {saved:LOCAL?'Saved on this device':'All changes saved',saving:'Saving…',error:'Not saved – check internet'}[syncState]}
 function syncBadge(){return `<span id="sync" class="sync ${syncState}" role="status">${syncText()}</span>`}
 function markDirty(id){if(!id)return;dirty.add(id);setSync('saving');clearTimeout(flushT);flushT=setTimeout(flush,700)}
 function save(){markDirty(view.pid)}
@@ -524,23 +520,27 @@ function offlineView(){return `<div class="auth">${brand()}<section class="panel
 function loadingView(){return `<div class="auth">${brand()}<p class="muted" style="text-align:center">Loading…</p></div>`}
 function errorView(){return `<div class="auth">${brand()}${msgHtml()}<div class="row"><button class="btn primary" data-act="reload">Try again</button><button class="btn" data-act="logout">Log out</button></div></div>`}
 function authView(){
-  const t=view.authTab;
+  const t=LOCAL?(window.__LOCAL_DB.userCount()===0?'signup':'login'):view.authTab;
   return `<div class="auth">${brand()}
-  <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="${t==='login'}" data-authtab="login">Log in</button><button class="tab" role="tab" aria-selected="${t==='signup'}" data-authtab="signup">Create account</button></div>
+  ${LOCAL?'':`<div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="${t==='login'}" data-authtab="login">Log in</button><button class="tab" role="tab" aria-selected="${t==='signup'}" data-authtab="signup">${LOCAL?'First-time setup':'Create account'}</button></div>`}
   ${msgHtml()}
   ${t==='login'?`<form class="panel" id="loginForm" novalidate>
-    <label class="f"><span>Email</span><input type="email" id="li-email" autocomplete="username" inputmode="email" value="${esc(view.email||'')}" required></label>
+    <label class="f"><span>${LOCAL?'Username':'Email'}</span><input type="${LOCAL?'text':'email'}" id="li-email" autocomplete="username" autocapitalize="off" autocorrect="off" ${LOCAL?'':'inputmode="email"'} value="${esc(view.email||'')}" required></label>
     <label class="f"><span>Password</span><input type="password" id="li-pw" autocomplete="current-password" required></label>
     <button class="btn primary" type="submit">Log in</button>
-    <button class="linkbtn" type="button" data-act="forgot">Forgot password?</button>
+    ${LOCAL?'<p class="small muted" style="margin:0">Forgot your password? Your clinic admin can reset it in Clinic & account → Team.</p>':'<button class="linkbtn" type="button" data-act="forgot">Forgot password?</button>'}
   </form>`:`<form class="panel" id="signupForm" novalidate>
     <label class="f"><span>Your name (as shown on records)</span><input type="text" id="su-name" placeholder="e.g. Dr Ayesha Khan" autocomplete="name" required></label>
-    <label class="f"><span>Email</span><input type="email" id="su-email" autocomplete="username" inputmode="email" required></label>
+    <label class="f"><span>${LOCAL?'Choose a username (for logging in)':'Email'}</span><input type="${LOCAL?'text':'email'}" id="su-email" autocomplete="username" autocapitalize="off" autocorrect="off" ${LOCAL?'placeholder="e.g. ayesha"':'inputmode="email"'} required></label>
     <label class="f"><span>Password (at least 8 characters)</span><input type="password" id="su-pw" autocomplete="new-password" minlength="8" required></label>
-    <button class="btn primary" type="submit">Create account</button>
-    <p class="small muted" style="margin:0">After this you can create your clinic, or join one with an invite code from your clinic admin.</p>
-  </form>`}
-  <p class="small muted" style="text-align:center">Works on phone, tablet and computer. Your records sync between them.</p></div>`;
+    <button class="btn primary" type="submit">${LOCAL?'Continue':'Create account'}</button>
+    <p class="small muted" style="margin:0">${LOCAL?'You become the clinic admin. Next you enter your clinic name, then you can add other dentists.':'After this you can create your clinic, or join one with an invite code from your clinic admin.'}</p>
+  </form>
+  ${LOCAL?`<section class="panel"><h3>Moving from another phone?</h3>
+    <label class="f"><span>Restore a full backup file instead</span><input type="file" id="restoreFile" accept=".json,application/json"></label>
+    ${view.confirm==='restore'?`<div class="confirm">Restore the backup of ${esc(view.restoreInfo||'')}? Then log in with your usual username.<span class="spacer"></span><button class="btn small" data-act="cancelConfirm">Cancel</button><button class="btn small primary" data-act="doRestore">Restore</button></div>`:''}
+  </section>`:''}`}
+  <p class="small muted" style="text-align:center">${LOCAL?'Records are saved on this device only.':'Works on phone, tablet and computer. Your records sync between them.'}</p></div>`;
 }
 function newpwView(){return `<div class="auth">${brand()}${msgHtml()}<form class="panel" id="newpwForm"><h2>Set a new password</h2>
   <label class="f"><span>New password (at least 8 characters)</span><input type="password" id="np-pw" autocomplete="new-password" minlength="8" required></label>
@@ -549,15 +549,15 @@ function onboardView(){
   const nm=(user&&user.user_metadata&&user.user_metadata.full_name)||'';
   return `<div class="auth">${brand()}${msgHtml()}
   <form class="panel" id="createForm"><h2>Create your clinic</h2>
-    <p class="small muted" style="margin:0">You become the clinic admin and get an invite code for your dentists.</p>
+    <p class="small muted" style="margin:0">${LOCAL?'You become the clinic admin and can add dentists with their own logins.':'You become the clinic admin and get an invite code for your dentists.'}</p>
     <label class="f"><span>Clinic name</span><input type="text" id="cc-name" placeholder="e.g. Smile Dental Clinic" required></label>
     <label class="f"><span>Address</span><input type="text" id="cc-address" placeholder="Street, city"></label>
     <label class="f"><span>Phone</span><input type="tel" id="cc-phone"></label>
     <label class="f"><span>Your name on records</span><input type="text" id="cc-me" value="${esc(nm)}" required></label>
     <button class="btn primary" type="submit">Create clinic</button>
   </form>
-  <div class="or"><span>or</span></div>
-  <form class="panel" id="joinForm"><h2>Join a clinic</h2>
+  <div class="or" ${LOCAL?'hidden':''}><span>or</span></div>
+  <form class="panel" id="joinForm" ${LOCAL?'hidden':''}><h2>Join a clinic</h2>
     <label class="f"><span>Invite code (from your clinic admin)</span><input type="text" id="jc-code" class="codein" autocapitalize="characters" autocomplete="off" required></label>
     <label class="f"><span>Your name on records</span><input type="text" id="jc-me" value="${esc(nm)}" required></label>
     <button class="btn" type="submit">Join clinic</button>
@@ -575,6 +575,7 @@ function listView(){
     <button class="btn small" data-act="settings">Clinic & account</button>
   </header>
   ${homeNav('list')}
+  ${deviceBanner()}
   <div class="row">
     <input type="search" id="search" placeholder="Search name, phone or CNIC" value="${esc(view.q)}" style="flex:1;min-width:0">
     <button class="btn primary" data-act="newPatient">+ New patient</button>
@@ -608,7 +609,8 @@ function settingsView(){
     <p class="small muted" style="margin:0">Leave empty to use the standard message. These words are filled in for each patient: {name} {clinic} {date} {time} {phone} {dentist}</p>
     ${admin?'<div class="row"><button class="btn primary" type="submit">Save clinic details</button></div>':'<p class="small muted" style="margin:0">Only a clinic admin can change these.</p>'}
   </form>
-  <section class="panel">
+  ${LOCAL?addDentistHtml(admin):''}
+  <section class="panel" ${LOCAL?'hidden':''}>
     <h3>Invite dentists</h3>
     ${admin?`<p class="small muted" style="margin:0">Send this code to a dentist. They create an account, choose “Join a clinic” and enter it.</p>
     <div class="row"><span class="invite" id="invite">${esc(clinic.invite_code)}</span><span class="spacer"></span><button class="btn small" data-act="copyCode">Copy</button>
@@ -623,6 +625,7 @@ function settingsView(){
       <span style="flex:1;min-width:0"><b>${esc(t.name)}</b>${self?' <span class="muted small">(you)</span>':''}<br><span class="small muted">Joined ${fmtDate(String(t.joined_at).slice(0,10))}</span></span>
       <span class="pill ${t.role==='admin'?'info':'ok'}">${t.role==='admin'?'Admin':'Dentist'}</span>
       ${admin&&!self?`<span class="row" style="gap:6px;width:100%;justify-content:flex-end">
+        ${LOCAL?(view.confirm==='pw:'+t.user_id?`<form id="resetPwForm" class="row" style="width:100%;gap:6px" data-uid="${t.user_id}"><input type="password" id="rp-pw" placeholder="New password (8+ characters)" minlength="8" autocomplete="new-password" style="flex:1;min-width:0"><button class="btn small primary" type="submit">Save</button><button class="btn small" type="button" data-act="cancelConfirm">Cancel</button></form>`:`<button class="btn small" data-askpw="${t.user_id}">Reset password</button>`):''}
         <button class="btn small" data-role="${t.role==='admin'?'dentist':'admin'}" data-uid="${t.user_id}">${t.role==='admin'?'Make dentist':'Make admin'}</button>
         ${view.confirm==='rm:'+t.user_id?`<button class="btn small" data-act="cancelConfirm">Keep</button><button class="btn small danger" data-rm="${t.user_id}">Yes, remove</button>`:`<button class="btn small danger" data-askrm="${t.user_id}">Remove</button>`}
       </span>`:''}
@@ -630,7 +633,7 @@ function settingsView(){
   </section>
   <form class="panel" id="meForm">
     <h3>Your account</h3>
-    <p class="small muted" style="margin:0">Logged in as ${esc(user.email)}</p>
+    <p class="small muted" style="margin:0">Logged in as ${LOCAL?'username ':''}${esc(user.email)}</p>
     <label class="f"><span>Your name on records in this clinic</span><input type="text" id="me-name" value="${esc(me.name)}" required></label>
     <div class="row"><button class="btn" type="submit">Save name</button></div>
   </form>
@@ -639,13 +642,14 @@ function settingsView(){
     <label class="f"><span>New password (at least 8 characters)</span><input type="password" id="pw-new" autocomplete="new-password" minlength="8" required></label>
     <div class="row"><button class="btn" type="submit">Change password</button></div>
   </form>
-  <section class="panel">
+  <section class="panel" ${LOCAL?'hidden':''}>
     <h3>Clinics</h3>
     ${memberships.length>1?`<label class="f"><span>Switch clinic</span><select id="switchClinic">${memberships.map(m=>`<option value="${m.clinic_id}" ${m.clinic_id===clinic.id?'selected':''}>${esc(m.clinics.name)}</option>`).join('')}</select></label>`:''}
     <div class="row"><button class="btn small" data-act="onboard">Create or join another clinic</button>
     ${view.confirm==='leave'?`<button class="btn small" data-act="cancelConfirm">Stay</button><button class="btn small danger" data-act="leave">Yes, leave ${esc(clinic.name)}</button>`:`<button class="btn small danger" data-act="askLeave">Leave this clinic</button>`}</div>
   </section>
-  <section class="panel">
+  ${LOCAL?localBackupHtml(admin):''}
+  <section class="panel" ${LOCAL?'hidden':''}>
     <h3>Backup</h3>
     <p class="small muted" style="margin:0">Records are stored online and sync automatically. You can also save a copy of all ${db.patients.length} patient records as a file.</p>
     <div class="row"><button class="btn" data-act="exportBackup">Save backup file</button></div>
@@ -659,6 +663,42 @@ function settingsView(){
   </section>`;
 }
 
+function deviceBanner(){
+  if(!LOCAL)return '';
+  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
+  const standalone=navigator.standalone||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
+  const last=+lsGet('lastFullBackup')||0,old=!last||Date.now()-last>7*864e5;let h='';
+  if(ios&&!standalone)h+=`<div class="msg warn">Add this app to your Home Screen (Share → Add to Home Screen) and always open it from there. Safari and the Home Screen app keep separate records, and Safari can delete records of a site you don't open for 7 days.</div>`;
+  if(old&&db.patients.length)h+=`<div class="msg warn">${last?'Your last full backup was more than a week ago.':'You have no backup yet.'} Records are only on this device. <button class="linkbtn" data-act="settings">Save a backup</button></div>`;
+  return h;
+}
+function addDentistHtml(admin){
+  if(!admin)return `<section class="panel"><h3>Dentists</h3><p class="small muted" style="margin:0">Your clinic admin adds dentists and resets passwords.</p></section>`;
+  return `<form class="panel" id="addDentistForm">
+    <h3>Add a dentist</h3>
+    <p class="small muted" style="margin:0">Each dentist logs in on this device with their own username and password. Their name appears on the notes they write.</p>
+    <div class="grid2">
+      <label class="f"><span>Name on records</span><input type="text" id="ad-name" placeholder="e.g. Dr Bilal Ahmed" required></label>
+      <label class="f"><span>Username</span><input type="text" id="ad-user" autocapitalize="off" autocorrect="off" autocomplete="off" placeholder="e.g. bilal" required></label>
+    </div>
+    <div class="grid2">
+      <label class="f"><span>Password (at least 8 characters)</span><input type="password" id="ad-pw" autocomplete="new-password" minlength="8" required></label>
+      <label class="f"><span>Role</span><select id="ad-role"><option value="dentist">Dentist</option><option value="admin">Admin (can add dentists)</option></select></label>
+    </div>
+    <div class="row"><button class="btn primary" type="submit">Add dentist</button></div>
+  </form>`;
+}
+function localBackupHtml(admin){
+  const last=+lsGet('lastFullBackup')||0;const days=last?Math.floor((Date.now()-last)/864e5):0;
+  return `<section class="panel">
+    <h3>Backup</h3>
+    <p class="small" style="margin:0">All records and X-rays are stored only on this device. If the phone is lost, broken or reset, they are gone. Save a full backup every week and keep it in iCloud Drive or Google Drive. The same file moves everything to a new phone.</p>
+    <p class="small muted" style="margin:0">Last full backup: ${last?fmtDate(dayOf(last))+(days?' ('+days+' day'+(days>1?'s':'')+' ago)':' (today)'):'never'}</p>
+    <div class="row">${view.backupBlob?`<button class="btn primary" data-act="shareBackup">Save backup file now</button><span class="small muted">${(view.backupBlob.size/1e6).toFixed(1)} MB ready</span>`:`<button class="btn primary" data-act="fullBackup" ${view.backupBusy?'disabled':''}>${view.backupBusy?'Preparing backup…':'Save full backup (with X-rays)'}</button>`}</div>
+    ${admin?`<label class="f"><span>Restore a full backup (replaces everything on this device)</span><input type="file" id="restoreFile" accept=".json,application/json"></label>`:''}
+    ${view.confirm==='restore'?`<div class="confirm">Replace ALL records on this device with the backup of ${esc(view.restoreInfo||'')}? Everyone is logged out afterwards.<span class="spacer"></span><button class="btn small" data-act="cancelConfirm">Cancel</button><button class="btn small danger" data-act="doRestore">Replace</button></div>`:''}
+  </section>`;
+}
 function patientView(){
   const p=P();if(!p){view.screen='list';return listView();}
   const al=alertsOf(p),ms=mhStatus(p);
@@ -882,6 +922,14 @@ document.addEventListener('submit',async e=>{
       const {data,error}=await sb.rpc('join_clinic',{p_code:v('jc-code'),p_my_name:v('jc-me')});if(error)throw error;
       toast('You joined the clinic');await afterLogin(data);return;
     }
+    if(f.id==='addDentistForm'){
+      const {error}=await sb.rpc('add_dentist',{p_clinic:clinic.id,p_name:v('ad-name'),p_username:v('ad-user'),p_password:$('#ad-pw').value,p_role:$('#ad-role').value});if(error)throw error;
+      await loadTeam();toast(v('ad-name')+' added. Username: '+v('ad-user').toLowerCase());
+    }
+    if(f.id==='resetPwForm'){
+      const {error}=await sb.rpc('admin_reset_password',{p_clinic:clinic.id,p_user:f.dataset.uid,p_password:$('#rp-pw').value});if(error)throw error;
+      view.confirm=null;toast('Password changed');
+    }
     if(f.id==='apptForm'){
       const d=$('#ap-date').value,t=$('#ap-time').value;if(!d||!t)throw new Error('Choose a date and time.');
       const starts=new Date(d+'T'+t);
@@ -924,7 +972,9 @@ document.addEventListener('click',async e=>{
   if(d.sms){sendReminder(d.sms,'sms');return}
   if(d.wa){sendReminder(d.wa,'wa');return}
   if(d.ast){const {error}=await sb.from('appointments').update({status:d.ast}).eq('id',d.aid);if(error){toast(friendly(error));return}[apptsDay,apptsPatient].forEach(l=>{const x=l.find(y=>y.id===d.aid);if(x)x.status=d.ast});render();return}
-  if(d.xr){xrView=d.xr;view.xrf={b:100,c:100,inv:false,zoom:false};view.confirm=null;render();return}
+  if(d.xr){xrView=d.xr;view.xrf={b:100,c:100,inv:false,zoom:false};view.confirm=null;view.xrBlob=null;render();
+    const x0=xrays.find(y=>y.id===d.xr);if(x0)sb.storage.from('xrays').download(x0.path).then(r=>{if(xrView===d.xr&&r.data)view.xrBlob=r.data});return}
+  if(d.askpw){view.confirm='pw:'+d.askpw;render();const i=$('#rp-pw');if(i)i.focus();return}
   if(d.askadel){view.confirm='adel:'+d.askadel;render();return}
   if(d.adel){const {error}=await sb.from('appointments').delete().eq('id',d.adel);if(error){toast(friendly(error));return}apptsDay=apptsDay.filter(a=>a.id!==d.adel);apptsPatient=apptsPatient.filter(a=>a.id!==d.adel);view.confirm=null;render();toast('Appointment deleted');return}
   if(d.authtab){view.authTab=d.authtab;view.msg=null;render();return}
@@ -945,6 +995,9 @@ document.addEventListener('click',async e=>{
   if(d.rm){const {error}=await sb.from('members').delete().eq('clinic_id',clinic.id).eq('user_id',d.rm);if(error){toast(friendly(error));return}view.confirm=null;await loadTeam();render();toast('Removed from the clinic');return}
   switch(d.act){
     case 'reload':location.reload();break;
+    case 'fullBackup':{view.backupBusy=true;render();try{const data=await window.__LOCAL_DB.exportAll();view.backupBlob=new Blob([JSON.stringify(data)],{type:'application/json'});}catch(err){toast('Could not prepare the backup')}view.backupBusy=false;render();break;}
+    case 'shareBackup':{const bl=view.backupBlob;if(!bl)break;deliverFile(bl,('Full_Backup_'+clinic.name+'_'+today()+'.json').replace(/[^\w.\-]+/g,'_'),'save').then(ok=>{if(ok){lsSet('lastFullBackup',String(Date.now()));view.backupBlob=null;toast('Backup saved – keep it in iCloud Drive or Google Drive');render()}},()=>toast('Could not save the backup'));break;}
+    case 'doRestore':{try{await window.__LOCAL_DB.importAll(view.restoreData);toast('Backup restored');setTimeout(()=>location.reload(),600)}catch(err){toast(friendly(err))}break;}
     case 'xrClose':xrView=null;view.confirm=null;render();break;
     case 'xrInv':view.xrf.inv=!view.xrf.inv;render();break;
     case 'xrZoom':view.xrf.zoom=!view.xrf.zoom;render();break;
@@ -953,7 +1006,7 @@ document.addEventListener('click',async e=>{
       const r1=await sb.from('xrays').delete().eq('id',x.id);if(r1.error){toast(friendly(r1.error));break;}
       await sb.storage.from('xrays').remove([x.path]);xrays=xrays.filter(y=>y.id!==x.id);xrView=null;view.confirm=null;render();toast('X-ray deleted');break;}
     case 'xrSave':{const x=xrays.find(y=>y.id===xrView);if(!x)break;
-      const {data,error}=await sb.storage.from('xrays').download(x.path);if(error){toast(friendly(error));break;}
+      const data=view.xrBlob;if(!data){toast('Still loading the image – try again in a moment');break;}
       const pp=P();const fn=((pp?pp.last+'_'+pp.first+'_':'')+x.kind+'_'+x.taken_on+'.'+(x.path.split('.').pop())).replace(/[^\w.\-]+/g,'_');
       deliverFile(data,fn,'save').then(ok=>{if(ok)toast('X-ray ready to save')},()=>toast('Could not share the file'));break;}
     case 'logout':if(dirty.size)await flush();await sb.auth.signOut();break;
@@ -1015,6 +1068,8 @@ async function importPatients(list){
 }
 document.addEventListener('change',async e=>{
   const el=e.target;
+  if(el.id==='restoreFile'&&el.files&&el.files[0]){try{const d=JSON.parse(await el.files[0].text());if(!d||d.app!=='clinic-records-local'||!d.tables)throw 0;
+    view.restoreData=d;view.restoreInfo=(d.clinics||[]).join(', ')+' from '+fmtDate(String(d.exported||'').slice(0,10));view.confirm='restore';render();}catch(err){toast('That file is not a full backup from this app')}el.value='';return}
   if(el.id==='xr-file'&&el.files&&el.files.length){view.xrKind=$('#xr-kind').value;await uploadXrays([...el.files]);return}
   if(el.id==='dayPick'&&el.value){view.day=el.value;render();refreshAppts();return}
   if(el.id==='switchClinic'){const m=memberships.find(x=>x.clinic_id===el.value);if(m)await openClinic(m);return}
