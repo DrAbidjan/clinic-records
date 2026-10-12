@@ -677,6 +677,13 @@ function settingsView(){
     ${admin?`<label class="f"><span>Import patients from a backup file</span><input type="file" id="importFile" accept=".json,application/json"></label>`:''}
     ${admin&&oldLocal?`<div class="row"><button class="btn small" data-act="importLocal">Bring in records saved on this device by the earlier app</button></div>`:''}
   </section>
+  ${LOCAL&&admin?`<section class="panel">
+    <h3>Delete clinic</h3>
+    <p class="small" style="margin:0">Deletes the clinic, all patients, X-rays, appointments and logins from this device for good. Save a full backup first if you may need the records later. A new clinic gets a new clinic code, so an old activation key won't work for it.</p>
+    ${view.confirm==='wipe'?`<label class="f"><span>Type the clinic name to confirm: <b>${esc(clinic.name)}</b></span><input type="text" id="wipe-name" autocomplete="off"></label>
+      <div class="row"><button class="btn" data-act="cancelConfirm">Cancel</button><button class="btn danger" data-act="wipe">Delete everything</button></div>`
+    :`<div class="row"><button class="btn danger" data-act="askWipe">Delete clinic and all records</button></div>`}
+  </section>`:''}
   <section class="panel">
     <h3>Keeping records safe</h3>
     <p class="small" style="margin:0">Patient records are confidential. Use a strong password, log out on shared computers, and remove dentists who leave the clinic.</p>
@@ -1078,6 +1085,11 @@ document.addEventListener('click',async e=>{
     case 'goActivate':view.screen='settings';view.newRecovery=null;view.confirm=null;view.msg=null;render();setTimeout(()=>{const a=$('#activation');if(a)a.scrollIntoView({block:'start'})},50);break;
     case 'copyClinicCode':{const c=clinic.clinic_code;const sel=()=>{const r=document.createRange();r.selectNodeContents($('#ccode'));const s=getSelection();s.removeAllRanges();s.addRange(r);toast('Code selected – copy it')};
       try{navigator.clipboard.writeText(c).then(()=>toast('Clinic code copied'),sel)}catch(err){sel()}break;}
+    case 'askWipe':view.confirm='wipe';render();const wn=$('#wipe-name');if(wn)wn.focus();break;
+    case 'wipe':{if(!isAdmin())break;const typed=($('#wipe-name').value||'').trim().toLowerCase();
+      if(typed!==String(clinic.name).trim().toLowerCase()){toast('The name does not match. Nothing was deleted.');break;}
+      await window.__LOCAL_DB.wipeAll();try{localStorage.removeItem('lastFullBackup');localStorage.removeItem('clinicId')}catch(e){}
+      toast('Clinic deleted');setTimeout(()=>location.reload(),700);break;}
     case 'showUsers':view.email=$('#li-email')?$('#li-email').value:'';view.showUsers=!view.showUsers;render();break;
     case 'fullBackup':{view.backupBusy=true;render();try{const data=await window.__LOCAL_DB.exportAll();view.backupBlob=new Blob([JSON.stringify(data)],{type:'application/json'});}catch(err){toast('Could not prepare the backup')}view.backupBusy=false;render();break;}
     case 'shareBackup':{const bl=view.backupBlob;if(!bl)break;deliverFile(bl,('Full_Backup_'+clinic.name+'_'+today()+'.json').replace(/[^\w.\-]+/g,'_'),'save').then(ok=>{if(ok){lsSet('lastFullBackup',String(Date.now()));view.backupBlob=null;toast('Backup saved – keep it in iCloud Drive or Google Drive');render()}},()=>toast('Could not save the backup'));break;}
