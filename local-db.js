@@ -174,7 +174,7 @@ async function importAll(obj){
   await setSession(null);
 }
 
-window.__LOCAL_DB={ready,userCount:()=>T.users.length,exportAll,importAll};
+window.__LOCAL_DB={ready,userCount:()=>T.users.length,usernames:()=>T.users.map(u=>{const m=T.members.find(x=>x.user_id===u.id);return{username:u.username,name:(m&&m.name)||(u.meta&&u.meta.full_name)||''}}),exportAll,importAll};
 window.supabase={createClient(){return{
   auth,from:query,rpc,storage,
   channel(){const c={on(){return c},subscribe(){return c}};return c},removeChannel(){}

@@ -528,7 +528,9 @@ function authView(){
     <label class="f"><span>${LOCAL?'Username':'Email'}</span><input type="${LOCAL?'text':'email'}" id="li-email" autocomplete="username" autocapitalize="off" autocorrect="off" ${LOCAL?'':'inputmode="email"'} value="${esc(view.email||'')}" required></label>
     <label class="f"><span>Password</span><input type="password" id="li-pw" autocomplete="current-password" required></label>
     <button class="btn primary" type="submit">Log in</button>
-    ${LOCAL?'<p class="small muted" style="margin:0">Forgot your password? Your clinic admin can reset it in Clinic & account → Team.</p>':'<button class="linkbtn" type="button" data-act="forgot">Forgot password?</button>'}
+    ${LOCAL?`<button class="linkbtn" type="button" data-act="showUsers">${view.showUsers?'Hide usernames':'Forgot your username?'}</button>
+    ${view.showUsers?`<div class="summary">${window.__LOCAL_DB.usernames().map(u=>`<span><b>${esc(u.username)}</b>${u.name?' · '+esc(u.name):''}</span>`).join('')}</div>`:''}
+    <p class="small muted" style="margin:0">Forgot your password? Your clinic admin can reset it in Clinic & account → Team.</p>`:'<button class="linkbtn" type="button" data-act="forgot">Forgot password?</button>'}
   </form>`:`<form class="panel" id="signupForm" novalidate>
     <label class="f"><span>Your name (as shown on records)</span><input type="text" id="su-name" placeholder="e.g. Dr Ayesha Khan" autocomplete="name" required></label>
     <label class="f"><span>${LOCAL?'Choose a username (for logging in)':'Email'}</span><input type="${LOCAL?'text':'email'}" id="su-email" autocomplete="username" autocapitalize="off" autocorrect="off" ${LOCAL?'placeholder="e.g. ayesha"':'inputmode="email"'} required></label>
@@ -995,6 +997,7 @@ document.addEventListener('click',async e=>{
   if(d.rm){const {error}=await sb.from('members').delete().eq('clinic_id',clinic.id).eq('user_id',d.rm);if(error){toast(friendly(error));return}view.confirm=null;await loadTeam();render();toast('Removed from the clinic');return}
   switch(d.act){
     case 'reload':location.reload();break;
+    case 'showUsers':view.email=$('#li-email')?$('#li-email').value:'';view.showUsers=!view.showUsers;render();break;
     case 'fullBackup':{view.backupBusy=true;render();try{const data=await window.__LOCAL_DB.exportAll();view.backupBlob=new Blob([JSON.stringify(data)],{type:'application/json'});}catch(err){toast('Could not prepare the backup')}view.backupBusy=false;render();break;}
     case 'shareBackup':{const bl=view.backupBlob;if(!bl)break;deliverFile(bl,('Full_Backup_'+clinic.name+'_'+today()+'.json').replace(/[^\w.\-]+/g,'_'),'save').then(ok=>{if(ok){lsSet('lastFullBackup',String(Date.now()));view.backupBlob=null;toast('Backup saved – keep it in iCloud Drive or Google Drive');render()}},()=>toast('Could not save the backup'));break;}
     case 'doRestore':{try{await window.__LOCAL_DB.importAll(view.restoreData);toast('Backup restored');setTimeout(()=>location.reload(),600)}catch(err){toast(friendly(err))}break;}
