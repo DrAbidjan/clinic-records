@@ -694,7 +694,7 @@ function render(){
   if(camStream&&!(view.screen==='patient'&&view.tab==='xrays'))stopCamera();
 }
 const DESIGNER_EMAIL='abid.26.am@gmail.com';
-const CREDIT=`<div class="credit"><div class="credit-qr" title="Scan to email Dr Abid Ali"></div><div class="credit-txt"><span>Made and designed by</span><b>Dr Abid Ali</b><span>Forensic Odontologist</span></div></div>`;
+const CREDIT=`<div class="credit"><div class="credit-qr" title="Scan to email Dr Abid Ali"></div><div class="credit-txt"><span class="credit-by">Made and designed by</span><b>Dr Abid Ali</b><span class="credit-role">Forensic Odontologist</span><span class="credit-scan">Scan the code to email</span></div></div>`;
 /* QR code with the designer's email, drawn by the qrcodejs library (loaded only when needed). */
 let qrLib=null;
 function fillQR(){
