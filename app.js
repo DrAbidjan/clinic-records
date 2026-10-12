@@ -1,7 +1,8 @@
 (function(){
-/* Clinic Patient Records – one-device version.
-   Everything is stored on this phone or computer (see local-db.js). Nothing to configure. */
-const CONFIG={SUPABASE_URL:'https://local.device',SUPABASE_ANON_KEY:'on-device-storage-no-key-needed'};
+/* Clinic Patient Records.
+   Device version: records stay on the device (local-db.js).
+   Online version: records are shared through Supabase; its two values are in config.js. */
+const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
@@ -131,9 +132,27 @@ function migrate(p){
 let sb=null,user=null,memberships=[],clinic=null,me=null,team=[],chan=null,recovering=false;
 let db={patients:[]};
 let view={screen:'loading',pid:null,tab:'details',tooth:null,q:'',confirm:null,msg:null,authTab:'login'};
-const configured=/^https:\/\//.test(CONFIG.SUPABASE_URL)&&CONFIG.SUPABASE_ANON_KEY.length>20;
+const configured=LOCAL||(/^https:\/\//.test(CONFIG.SUPABASE_URL||'')&&String(CONFIG.SUPABASE_ANON_KEY||'').length>20);
 
-function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,2400)}
+/* Soft UI sounds made in the browser (no sound files). Switch on/off in the sidebar or Clinic & account. */
+const Sound={ctx:null,on:lsGet('sound')!=='off',
+  get(){if(!this.ctx){const A=window.AudioContext||window.webkitAudioContext;if(!A)return null;this.ctx=new A()}if(this.ctx.state==='suspended')this.ctx.resume();return this.ctx},
+  tone(freq,dur,type,vol,delay){const c=this.get();if(!c)return;const t0=c.currentTime+(delay||0);const o=c.createOscillator(),g=c.createGain();
+    o.type=type||'sine';o.frequency.setValueAtTime(freq,t0);g.gain.setValueAtTime(0.0001,t0);g.gain.exponentialRampToValueAtTime(vol||0.06,t0+0.008);g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    o.connect(g).connect(c.destination);o.start(t0);o.stop(t0+dur+0.02)},
+  play(kind){if(!this.on)return;try{
+    if(kind==='click')this.tone(1250,0.05,'triangle',0.035);
+    else if(kind==='tab')this.tone(880,0.06,'sine',0.04);
+    else if(kind==='success'){this.tone(660,0.14,'sine',0.06);this.tone(990,0.22,'sine',0.05,0.09)}
+    else if(kind==='error'){this.tone(220,0.18,'square',0.03);this.tone(165,0.24,'square',0.025,0.12)}
+  }catch(e){}},
+  toggle(){this.on=!this.on;lsSet('sound',this.on?'on':'off');if(this.on)this.play('success')}
+};
+document.addEventListener('pointerdown',e=>{const el=e.target.closest('button,.btn,[data-surf],a.btn,select');if(!el||el.disabled)return;
+  Sound.play(el.classList.contains('tab')||el.dataset.tab||el.dataset.home?'tab':'click')},true);
+function toastKind(m){if(/not |wrong|could not|invalid|expired|only |first|ended|cannot|can't|doesn't|failed|too many|no internet|match/i.test(m))return 'error';
+  if(/saved|added|created|booked|activated|copied|restored|deleted|changed|imported|ready|completed|joined|removed|cleared|reviewed|thank/i.test(m))return 'success';return ''}
+function toast(m){const k=toastKind(m);if(k)Sound.play(k);const t=$('#toast');t.textContent=m;t.className='toast '+k;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,2400)}
 function P(){return db.patients.find(p=>p.id===view.pid)}
 const isAdmin=()=>me&&me.role==='admin';
 const isAcct=()=>me&&me.role==='accountant';
@@ -158,11 +177,11 @@ function syncBadge(){return `<span id="sync" class="sync ${syncState}" role="sta
 let dailyBlob=null,dailyBusy=false,snapList=null;
 const backedUpToday=()=>{const l=+lsGet('lastFullBackup')||0;return l&&dayOf(l)===today()};
 async function prepareDaily(){
-  if(!LOCAL||dailyBusy||dailyBlob||backedUpToday()||!db.patients.length)return;
-  dailyBusy=true;try{const data=await window.__LOCAL_DB.exportAll();dailyBlob=new Blob([JSON.stringify(data)],{type:'application/json'});softRender()}catch(e){}dailyBusy=false;
+  if(dailyBusy||dailyBlob||backedUpToday()||!db.patients.length)return;
+  dailyBusy=true;try{const data=LOCAL?await window.__LOCAL_DB.exportAll():{app:'clinic-patient-records',clinic:clinic.name,exported:new Date().toISOString(),patients:db.patients.map(x=>Object.assign(strip(x),{id:x.id}))};dailyBlob=new Blob([JSON.stringify(data)],{type:'application/json'});softRender()}catch(e){}dailyBusy=false;
 }
-if(window.__LOCAL_DB)setInterval(()=>{window.__LOCAL_DB.autoSnapshot().catch(()=>{});if(clinic)prepareDaily()},60*60*1000);
-const readOnly=()=>LOCAL&&clinic&&clinic.lic&&clinic.lic.state==='expired';
+setInterval(()=>{if(window.__LOCAL_DB)window.__LOCAL_DB.autoSnapshot().catch(()=>{});if(clinic)prepareDaily()},60*60*1000);
+const readOnly=()=>!!(clinic&&clinic.lic&&clinic.lic.state==='expired');
 let roToastAt=0;
 function markDirty(id){if(!id)return;
   if(isAcct()){if(Date.now()-roToastAt>4000){toast('Accountants can view and print, but not change patient records.');roToastAt=Date.now()}
@@ -210,6 +229,11 @@ function subscribe(){
     if(view.pid===r.id)toast('Updated by '+nameOf(r.updated_by));softRender();
   }).on('postgres_changes',{event:'*',schema:'public',table:'appointments',filter:'clinic_id=eq.'+clinic.id},()=>{
     if(view.screen==='appts'||(view.screen==='patient'&&view.tab==='appts'))refreshAppts();
+  }).on('postgres_changes',{event:'INSERT',schema:'public',table:'messages',filter:'clinic_id=eq.'+clinic.id},pl=>{
+    const m=pl.new;if(!m||msgs.some(x=>x.id===m.id))return;msgs.push(m);
+    if(forMe(m)&&m.sender!==user.id){Sound.play('success');
+      if(view.screen==='msgs')markRead().then(()=>softRender());
+      else{const t=$('#toast');t.textContent=(m.kind==='arrived'?'':'New message from '+m.sender_name+': ')+m.body;t.className='toast success';t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,5000);softRender()}}
   }).subscribe();
 }
 document.addEventListener('visibilitychange',async()=>{
@@ -236,11 +260,18 @@ async function boot(){
   user=session.user;await afterLogin();
 }
 function resetState(){if(chan&&sb)sb.removeChannel(chan);chan=null;user=null;memberships=[];clinic=null;me=null;team=[];db={patients:[]};dirty.clear();setSync('saved')}
+function normClinic(c){
+  if(!c||LOCAL)return c;
+  c.clinic_code=String(c.id).replace(/-/g,'').slice(0,10).toUpperCase().replace(/^(.{5})/,'$1-');
+  if(c.licensed_at)c.lic={state:'active',name:c.license_name,date:dayOf(c.licensed_at)};
+  else{const left=Math.ceil((new Date(c.created_at).getTime()+14*864e5-Date.now())/864e5);c.lic=left>0?{state:'trial',daysLeft:left}:{state:'expired'}}
+  return c;
+}
 async function afterLogin(prefer){
   view={screen:'loading',pid:null,tab:'details',tooth:null,q:'',confirm:null,msg:null,authTab:'login'};render();
-  const {data,error}=await sb.from('members').select('clinic_id,role,name,clinics(id,name,address,phone,invite_code,reminder_template)').eq('user_id',user.id);
+  const {data,error}=await sb.from('members').select('clinic_id,role,name,clinics(id,name,address,phone,invite_code,reminder_template,created_at,licensed_at,license_name)').eq('user_id',user.id);
   if(error){view.screen='auth';view.msg={t:'err',m:friendly(error)};render();return}
-  memberships=(data||[]).filter(m=>m.clinics);
+  memberships=(data||[]).filter(m=>m.clinics);memberships.forEach(m=>normClinic(m.clinics));
   if(!memberships.length){view.screen='onboard';render();return}
   const want=prefer||lsGet('clinicId');
   await openClinic(memberships.find(x=>x.clinic_id===want)||memberships[0]);
@@ -252,10 +283,11 @@ async function openClinic(m){
   try{db={patients:[]};await Promise.all([loadPatients(),loadTeam()]);}
   catch(e){view.screen='error';view.msg={t:'err',m:friendly(e)};render();return}
   subscribe();
-  if(LOCAL)setTimeout(prepareDaily,1500);
-  view={screen:'list',pid:null,tab:'details',tooth:null,q:'',confirm:null,msg:null,authTab:'login'};render();
+  setTimeout(prepareDaily,1500);startAttendance();loadMessages().then(()=>{const n=unreadCount();if(n){render();setTimeout(()=>toast('You have '+n+' new message'+(n>1?'s':'')+' – open Messages'),400)}});
+  view={screen:showWelcome?'welcome':'list',pid:null,tab:'details',tooth:null,q:'',confirm:null,msg:null,authTab:'login'};render();
+  if(showWelcome){showWelcome=false;Sound.play('success');setTimeout(()=>{if(view.screen==='welcome'){view.screen='list';render()}},3500)}
 }
-async function refreshClinic(){const {data}=await sb.from('clinics').select('id,name,address,phone,invite_code,reminder_template').eq('id',clinic.id).single();if(data){clinic=data;const m=memberships.find(x=>x.clinic_id===clinic.id);if(m)m.clinics=clinic;}}
+async function refreshClinic(){const {data}=await sb.from('clinics').select('id,name,address,phone,invite_code,reminder_template,created_at,licensed_at,license_name').eq('id',clinic.id).single();if(data){clinic=normClinic(data);const m=memberships.find(x=>x.clinic_id===clinic.id);if(m)m.clinics=clinic;}}
 
 /* ---------- PDF record ---------- */
 function chartLines(p){
@@ -348,7 +380,7 @@ const hhmm=t=>{const d=new Date(t);let h=d.getHours();const m=pad(d.getMinutes()
 const dayOf=t=>{const d=new Date(t);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())};
 const longDay=d=>{const x=new Date(d+'T12:00');return x.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})};
 const shiftDay=(d,n)=>{const x=new Date(d+'T12:00');x.setDate(x.getDate()+n);return dayOf(x)};
-const STATUS_A={scheduled:['Booked','info'],done:['Attended','ok'],noshow:['Did not come','alert'],cancelled:['Cancelled','warn']};
+const STATUS_A={scheduled:['Booked','info'],arrived:['Arrived · waiting','warn'],done:['Attended','ok'],noshow:['Did not come','alert'],cancelled:['Cancelled','warn']};
 function waNumber(ph){let d=String(ph||'').replace(/\D/g,'');if(d.startsWith('00'))d=d.slice(2);if(d.startsWith('0'))d='92'+d.slice(1);return d.length>=10?d:''}
 function smsNumber(ph){return String(ph||'').replace(/[^\d+]/g,'')}
 function reminderText(a,p){
@@ -362,18 +394,70 @@ async function loadDay(day){
   const {data,error}=await sb.from('appointments').select('*').eq('clinic_id',clinic.id).gte('starts_at',s.toISOString()).lt('starts_at',e.toISOString()).order('starts_at');
   if(error)throw error;apptsDay=data||[];
 }
+let monthCounts={},monthLoaded='';
+async function loadMonth(m){
+  const s=new Date(m+'-01T00:00:00'),e=new Date(s);e.setMonth(e.getMonth()+1);
+  const {data}=await sb.from('appointments').select('starts_at,status').eq('clinic_id',clinic.id).gte('starts_at',s.toISOString()).lt('starts_at',e.toISOString());
+  monthCounts={};(data||[]).filter(a=>a.status!=='cancelled').forEach(a=>{const d=dayOf(a.starts_at);monthCounts[d]=(monthCounts[d]||0)+1});monthLoaded=m;
+}
+function calendarHtml(){
+  const day=view.day||today();const m=view.month||day.slice(0,7);
+  const first=new Date(m+'-01T12:00:00');const startPad=(first.getDay()+6)%7;
+  const days=new Date(first.getFullYear(),first.getMonth()+1,0).getDate();
+  const prev=new Date(first);prev.setMonth(prev.getMonth()-1);const next=new Date(first);next.setMonth(next.getMonth()+1);
+  const mk=x=>x.getFullYear()+'-'+pad(x.getMonth()+1);
+  let cells='';for(let i=0;i<startPad;i++)cells+='<span></span>';
+  for(let d=1;d<=days;d++){const ds=m+'-'+pad(d),n=monthCounts[ds]||0;
+    cells+=`<button class="cal-d ${ds===day?'sel':''} ${ds===today()?'today':''} ${n?'has':''}" data-day="${ds}" aria-label="${longDay(ds)}${n?', '+n+' appointment'+(n>1?'s':''):''}"><span>${d}</span>${n?`<em>${n}</em>`:''}</button>`}
+  return `<section class="panel cal">
+    <div class="row"><button class="btn small" data-month="${mk(prev)}" aria-label="Previous month">‹</button><b style="flex:1;text-align:center">${first.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</b><button class="btn small" data-month="${mk(next)}" aria-label="Next month">›</button></div>
+    <div class="cal-grid">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(w=>`<span class="cal-w">${w}</span>`).join('')}${cells}</div>
+    <p class="small muted" style="margin:0">Numbers show how many patients are booked that day.</p>
+  </section>`;
+}
 async function loadPatientAppts(pid){
   const {data,error}=await sb.from('appointments').select('*').eq('patient_id',pid).order('starts_at',{ascending:false}).limit(50);
   if(error)throw error;apptsPatient=data||[];
 }
 async function refreshAppts(){
   try{
-    if(view.screen==='appts'){apptsLoading=true;await loadDay(view.day||today());}
+    if(view.screen==='appts'){apptsLoading=true;const m=view.month||(view.day||today()).slice(0,7);await Promise.all([loadDay(view.day||today()),loadMonth(m)]);}
     else if(view.screen==='patient'&&view.tab==='appts'&&view.pid){apptsLoading=true;await loadPatientAppts(view.pid);}
   }catch(e){toast(friendly(e))}
   apptsLoading=false;softRender();
 }
-function homeNav(active){return `<nav class="tabs homenav" role="tablist"><button class="tab" role="tab" aria-selected="${active==='list'}" data-home="list">Patients</button><button class="tab" role="tab" aria-selected="${active==='appts'}" data-home="appts">Appointments</button></nav>`}
+function homeNav(active){return `<nav class="tabs homenav desk-hide" role="tablist"><button class="tab" role="tab" aria-selected="${active==='list'}" data-home="list">Patients</button><button class="tab" role="tab" aria-selected="${active==='appts'}" data-home="appts">Appointments</button><button class="tab" role="tab" aria-selected="${active==='msgs'}" data-home="msgs">Messages${unreadCount()?' ('+unreadCount()+')':''}</button></nav>`}
+/* Team messages on this device: "patient arrived" notes and messages between staff. */
+let msgs=[];
+async function loadMessages(){if(!clinic)return;const {data}=await sb.from('messages').select('*').eq('clinic_id',clinic.id).order('created_at');msgs=(data||[]).slice(-300)}
+const forMe=m=>(m.recipient==='all'||m.recipient===user.id);
+const unreadCount=()=>msgs.filter(m=>forMe(m)&&m.sender!==user.id&&!(m.read_by||[]).includes(user.id)).length;
+async function sendMessage(to,text,extra){
+  const row=Object.assign({clinic_id:clinic.id,sender:user.id,sender_name:me.name,recipient:to,body:String(text).trim(),read_by:[user.id]},LOCAL?{created_at:new Date().toISOString()}:{},extra||{});
+  const {data,error}=await sb.from('messages').insert(row);if(error)throw error;msgs.push(data[0]);
+}
+async function markRead(){const un=msgs.filter(m=>forMe(m)&&!(m.read_by||[]).includes(user.id));
+  for(const m of un){m.read_by=(m.read_by||[]).concat(user.id);await sb.from('messages').update({read_by:m.read_by}).eq('id',m.id)}}
+function msgsView(){
+  const others=team.filter(x=>x.user_id!==user.id);
+  const list=msgs.filter(m=>forMe(m)||m.sender===user.id);
+  const todays=apptsDay.filter(a=>dayOf(a.starts_at)===today()&&a.status==='scheduled');
+  let lastDay='';
+  return `
+  ${clockMini()}
+  <header class="top"><div style="min-width:0"><h1>Messages</h1><div class="sub">${LOCAL?'Notes between the team on this device':'Notes between the team – they appear on every computer at once'}</div></div><button class="btn small desk-hide" data-act="settings">Clinic & account</button></header>
+  ${homeNav('msgs')}
+  <section class="panel chat">
+    <div class="chat-list" id="chatList">${list.length?list.map(m=>{const d=dayOf(m.created_at);const sep=d!==lastDay?`<div class="chat-day">${d===today()?'Today':longDay(d)}</div>`:'';lastDay=d;
+      const mine=m.sender===user.id;const toName=m.recipient==='all'?'Everyone':(team.find(x=>x.user_id===m.recipient)||{}).name||'';
+      return `${sep}<div class="bubble ${mine?'mine':''} ${m.kind==='arrived'?'arr':''}"><div class="b-head"><b>${esc(mine?'You':m.sender_name)}</b><span>to ${esc(mine&&m.recipient!=='all'?toName:m.recipient==='all'?'everyone':'you')} · ${hm(m.created_at)}</span></div><div class="b-text">${esc(m.body)}</div>${m.patient_id&&db.patients.some(p=>p.id===m.patient_id)?`<button class="linkbtn" data-open="${m.patient_id}">Open patient file</button>`:''}</div>`}).join(''):'<p class="empty" style="margin:0">No messages yet. Write the first one below.</p>'}</div>
+    <form id="msgForm" class="chat-form">
+      <div class="row"><label class="small muted" for="msg-to">To</label><select id="msg-to" style="width:auto">${'<option value="all">Everyone</option>'+others.map(x=>`<option value="${x.user_id}" ${view.msgTo===x.user_id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="row" style="align-items:flex-end"><textarea id="msg-text" rows="2" placeholder="Write a message, e.g. Patient in waiting room asks about the bill" style="flex:1;min-width:0"></textarea><button class="btn primary" type="submit">Send</button></div>
+      ${todays.length?`<div class="row"><span class="small muted">Quick:</span>${todays.slice(0,6).map(a=>{const p=db.patients.find(x=>x.id===a.patient_id);return p?`<button class="btn small" type="button" data-arrived="${a.id}">${esc(p.first)} arrived (${hhmm(a.starts_at)})</button>`:''}).join('')}</div>`:''}
+    </form>
+  </section>`;
+}
 function apptCard(a,showPatient){
   const p=db.patients.find(x=>x.id===a.patient_id);const dn=team.find(t=>t.user_id===a.dentist_id);const st=STATUS_A[a.status]||STATUS_A.scheduled;
   const nm=p?(p.first+' '+p.last):'Patient record deleted';const phone=p&&p.phone;
@@ -385,7 +469,7 @@ function apptCard(a,showPatient){
       <span class="small">${esc(a.reason||'Appointment')}${dn?' · '+esc(dn.name):''}${a.note?' · '+esc(a.note):''}</span>
       <span class="alerts"><span class="pill ${st[1]}">${st[0]}</span>${a.reminded_at?`<span class="pill ok">Reminder opened ${fmtTime(a.reminded_at)}</span>`:(upcoming?'<span class="pill warn">No reminder yet</span>':'')}${p&&!phone?'<span class="pill alert">No mobile number</span>':''}</span>
       ${upcoming&&phone?`<div class="row"><button class="btn small primary" data-sms="${a.id}">SMS reminder</button><button class="btn small wa" data-wa="${a.id}">WhatsApp</button></div>`:''}
-      <div class="row">${a.status==='scheduled'?`<button class="btn small" data-ast="done" data-aid="${a.id}">Attended</button><button class="btn small" data-ast="noshow" data-aid="${a.id}">Did not come</button><button class="btn small" data-ast="cancelled" data-aid="${a.id}">Cancel</button>`:`<button class="btn small" data-ast="scheduled" data-aid="${a.id}">Back to booked</button>`}
+      <div class="row">${a.status==='scheduled'&&dayOf(a.starts_at)===today()?`<button class="btn small primary" data-arrived="${a.id}">Patient arrived</button>`:''}${a.status==='scheduled'||a.status==='arrived'?`<button class="btn small" data-ast="done" data-aid="${a.id}">Attended</button><button class="btn small" data-ast="noshow" data-aid="${a.id}">Did not come</button><button class="btn small" data-ast="cancelled" data-aid="${a.id}">Cancel</button>`:`<button class="btn small" data-ast="scheduled" data-aid="${a.id}">Back to booked</button>`}
       ${view.confirm==='adel:'+a.id?`<button class="btn small" data-act="cancelConfirm">Keep</button><button class="btn small danger" data-adel="${a.id}">Yes, delete</button>`:`<button class="btn small danger" data-askadel="${a.id}">Delete</button>`}</div>
     </div>
   </div>`;
@@ -395,11 +479,14 @@ function apptsView(){
   const act=apptsDay.filter(a=>a.status!=='cancelled');
   const need=apptsDay.filter(a=>a.status==='scheduled'&&!a.reminded_at).length;
   return `
+  ${clockMini()}
   <header class="top">
     <div style="min-width:0"><h1>${esc(clinic.name)}</h1><div class="sub">${esc(me.name)} ${syncBadge()}</div></div>
-    <button class="btn small" data-act="settings">Clinic & account</button>
+    <button class="btn small desk-hide" data-act="settings">Clinic & account</button>
   </header>
   ${homeNav('appts')}
+  <div class="appts-layout">
+  ${calendarHtml()}
   <section class="panel">
     <div class="row daynav"><button class="btn small" data-day="${shiftDay(day,-1)}" aria-label="Previous day">‹</button>
       <div style="flex:1;min-width:0;text-align:center"><b>${day===today()?'Today':day===shiftDay(today(),1)?'Tomorrow':longDay(day).split(' ')[0]}</b><div class="small muted">${longDay(day)}</div></div>
@@ -409,6 +496,7 @@ function apptsView(){
     <div class="small muted">${apptsLoading?'Loading…':act.length+' appointment'+(act.length===1?'':'s')+(need?' · '+need+' without a reminder':'')}</div>
     ${apptsDay.length?`<div class="appts">${apptsDay.map(a=>apptCard(a,true)).join('')}</div>`:(apptsLoading?'':'<div class="empty">No appointments this day. Book one from a patient’s file, in the Appointments tab.</div>')}
   </section>
+  </div>
   <p class="small muted">Reminders open the SMS or WhatsApp app on this phone with the message ready. You tap Send. Change the message in Clinic & account.</p>`;
 }
 function apptTab(p){
@@ -443,7 +531,7 @@ async function sendReminder(id,via){
 
 /* ---------- X-rays ---------- */
 let xrays=[],xrLoading=false,xrUrls={},xrView=null,xrBusy=false;
-const XR_KINDS=['OPG','Periapical (PA)','Bitewing (BW)','Lateral ceph','CBCT / scan report','Intraoral photo','Extraoral photo','Other'];
+const XR_KINDS=['Microscope photo','Intraoral camera photo','OPG','Periapical (PA)','Bitewing (BW)','Lateral ceph','CBCT / scan report','Intraoral photo','Extraoral photo','Other'];
 async function loadXrays(pid){
   const {data,error}=await sb.from('xrays').select('*').eq('patient_id',pid).order('taken_on',{ascending:false});
   if(error)throw error;xrays=data||[];
@@ -453,10 +541,11 @@ async function loadXrays(pid){
 async function refreshXrays(){xrLoading=true;softRender();try{await loadXrays(view.pid)}catch(e){toast(friendly(e))}xrLoading=false;softRender()}
 function shrinkImage(file){
   return new Promise(res=>{
-    if(!/^image\/(jpeg|png|webp)$/.test(file.type)){res({blob:file,type:file.type||'application/octet-stream'});return}
+    if(!/^image\/(jpeg|png|webp|bmp|x-ms-bmp)$/.test(file.type)){res({blob:file,type:file.type||'application/octet-stream'});return}
+    const isBmp=/bmp/.test(file.type);
     const img=new Image(),url=URL.createObjectURL(file);
     img.onload=()=>{const max=3000,w=img.naturalWidth,h=img.naturalHeight,sc=Math.min(1,max/Math.max(w,h));
-      if(sc===1&&file.size<4e6){URL.revokeObjectURL(url);res({blob:file,type:file.type});return}
+      if(sc===1&&file.size<4e6&&!isBmp){URL.revokeObjectURL(url);res({blob:file,type:file.type});return}
       const c=document.createElement('canvas');c.width=Math.round(w*sc);c.height=Math.round(h*sc);c.getContext('2d').drawImage(img,0,0,c.width,c.height);
       c.toBlob(b=>{URL.revokeObjectURL(url);res(b?{blob:b,type:'image/jpeg'}:{blob:file,type:file.type})},'image/jpeg',0.92)};
     img.onerror=()=>{URL.revokeObjectURL(url);res({blob:file,type:file.type})};img.src=url;
@@ -480,6 +569,71 @@ async function uploadXrays(files){
   }
   xrBusy=false;if(ok)toast(ok+' X-ray'+(ok>1?'s':'')+' saved');await refreshXrays();
 }
+/* X-ray machine folder (Chrome / Edge on a computer): watch the folder the X-ray software saves into. */
+const FOLDER_OK='showDirectoryPicker' in window;
+const devStore={db:null,open(){return this.db||(this.db=new Promise((res,rej)=>{const r=indexedDB.open('clinic-device-settings',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}))},
+  async get(k){const d=await this.open();return new Promise((res,rej)=>{const q=d.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})},
+  async set(k,v){const d=await this.open();return new Promise((res,rej)=>{const tx=d.transaction('kv','readwrite');tx.objectStore('kv').put(v,k);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}};
+const XR_EXT=/\.(jpe?g|png|bmp|webp|pdf)$/i;
+let xrDir=null,xrDirState='none',xrSeen=new Set(),xrFound=[],xrWatchT=null,xrWatchFrom=0;
+async function loadXrDir(){if(!FOLDER_OK)return;try{xrDir=await devStore.get('xrayDir')}catch(e){xrDir=null}
+  xrDirState=!xrDir?'none':(await xrDir.queryPermission({mode:'read'}))==='granted'?'ok':'ask';
+  try{xrSeen=new Set(JSON.parse(lsGet('xrSeen')||'[]'))}catch(e){xrSeen=new Set()}}
+function rememberSeen(k){xrSeen.add(k);lsSet('xrSeen',JSON.stringify([...xrSeen].slice(-3000)))}
+async function scanDir(dir,depth,out){
+  for await(const [name,h] of dir.entries()){
+    if(h.kind==='file'&&XR_EXT.test(name)){const f=await h.getFile();out.push({name,handle:h,file:f,key:name+'|'+f.size+'|'+f.lastModified})}
+    else if(h.kind==='directory'&&depth<2)await scanDir(h,depth+1,out);
+    if(out.length>4000)break;
+  }return out}
+async function scanXrayFolder(){
+  if(xrDirState!=='ok'||view.screen!=='patient'||view.tab!=='xrays')return;
+  try{const all=await scanDir(xrDir,0,[]);
+    const fresh=all.filter(x=>!xrSeen.has(x.key)&&x.file.lastModified>=xrWatchFrom).sort((a,b)=>b.file.lastModified-a.file.lastModified);
+    const before=new Set(xrFound.map(x=>x.key));xrFound=fresh.slice(0,12);
+    if(xrFound.some(x=>!before.has(x.key))){Sound.play('success');refreshFolderPanel()}
+  }catch(e){xrDirState='ask';refreshFolderPanel()}
+}
+function refreshFolderPanel(){const el=$('#xrFolderPanel');if(el)el.outerHTML=folderPanel();else softRender()}
+function startXrWatch(){stopXrWatch();if(!FOLDER_OK)return;xrWatchFrom=Date.now()-15*60*1000;xrFound=[];
+  loadXrDir().then(()=>{refreshFolderPanel();scanXrayFolder()});xrWatchT=setInterval(scanXrayFolder,4000)}
+function stopXrWatch(){if(xrWatchT)clearInterval(xrWatchT);xrWatchT=null}
+let camStream=null,camDevices=[],camErr='';
+const CAM_OK=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+async function startCamera(deviceId){
+  stopCamera();camErr='';
+  try{camStream=await navigator.mediaDevices.getUserMedia({video:deviceId?{deviceId:{exact:deviceId},width:{ideal:1920},height:{ideal:1080}}:{width:{ideal:1920},height:{ideal:1080}},audio:false});
+    camDevices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');view.camId=deviceId||(camStream.getVideoTracks()[0].getSettings().deviceId);}
+  catch(e){camErr=e&&e.name==='NotAllowedError'?'Camera access was blocked. Allow the camera for this site in the browser, then try again.':'No camera found. Connect the microscope or intraoral camera by USB (or an HDMI capture adapter) and try again.'}
+  render();const v=$('#camVideo');if(v&&camStream){v.srcObject=camStream;v.play().catch(()=>{})}
+}
+function stopCamera(){if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null}}
+function cameraPanel(){
+  if(!CAM_OK)return '';
+  return `<section class="panel" id="camPanel">
+    <div class="row"><h2>Microscope / intraoral camera</h2><span class="spacer"></span>${camStream?'<span class="pill ok">Live</span>':''}</div>
+    ${camStream?`<div class="cam-box"><video id="camVideo" autoplay playsinline muted></video></div>
+      <div class="row">${camDevices.length>1?`<select id="camSel" style="width:auto">${camDevices.map((d,i)=>`<option value="${d.deviceId}" ${d.deviceId===view.camId?'selected':''}>${esc(d.label||'Camera '+(i+1))}</option>`).join('')}</select>`:''}
+      <button class="btn primary" data-act="camShot">${icon('camera')} Take photo</button><button class="btn small" data-act="camStop">Stop camera</button></div>
+      <p class="small muted" style="margin:0">Photos are saved with the type, teeth and date chosen above (for example “Microscope photo”, tooth 36).</p>`
+    :`<p class="small muted" style="margin:0">Connect the microscope camera or intraoral camera to this computer (USB, or HDMI with a capture adapter). It works like a webcam: see the live picture and take photos straight into this patient's file.</p>
+      ${camErr?`<p class="small" style="margin:0;color:var(--alert)">${esc(camErr)}</p>`:''}
+      <div class="row"><button class="btn" data-act="camStart">${icon('camera')} Start camera</button></div>`}
+  </section>`;
+}
+function folderPanel(){
+  if(!FOLDER_OK)return '';
+  return `<section class="panel" id="xrFolderPanel">
+    <div class="row"><h2>X-ray machine folder</h2><span class="spacer"></span>${xrDirState==='ok'?`<span class="pill ok">Watching${xrDir?' · '+esc(xrDir.name):''}</span>`:''}</div>
+    ${xrDirState==='none'?`<p class="small muted" style="margin:0">Connect the folder where your X-ray software saves images (JPG, PNG or BMP). While this tab is open, new X-rays appear here and you add them with one click.</p>
+      <div class="row"><button class="btn primary" data-act="xrConnect">Connect X-ray folder</button></div>`
+    :xrDirState==='ask'?`<p class="small muted" style="margin:0">The browser needs your permission again to read <b>${esc(xrDir&&xrDir.name)}</b>.</p><div class="row"><button class="btn primary" data-act="xrAllow">Allow access</button><button class="btn small" data-act="xrConnect">Choose another folder</button></div>`
+    :`${xrFound.length?`<div class="xnew">${xrFound.map((x,i)=>`<div class="xnew-row"><span style="flex:1;min-width:0"><b>${esc(x.name)}</b><br><span class="small muted">${fmtTime(new Date(x.file.lastModified).toISOString())} · ${x.file.size>1e6?(x.file.size/1e6).toFixed(1)+' MB':Math.round(x.file.size/1e3)+' KB'}</span></span>
+        <button class="btn small primary" data-xradd="${i}">Add to ${esc(P()?P().first:'patient')}</button><button class="btn small" data-xrskip="${i}">Ignore</button></div>`).join('')}</div>`
+      :`<p class="small muted" style="margin:0">Waiting for new X-rays… Take the X-ray as usual; it appears here within a few seconds. Type, teeth and date are taken from the form above.</p>`}
+      <div class="row"><button class="btn small" data-act="xrShowRecent">Show images from the last 3 days</button><button class="btn small" data-act="xrConnect">Change folder</button></div>`}
+  </section>`;
+}
 function xrayTab(p){
   const fmtSize=b=>b>1e6?(b/1e6).toFixed(1)+' MB':Math.round(b/1e3)+' KB';
   return `<section class="panel">
@@ -493,6 +647,8 @@ function xrayTab(p){
     <label class="btn primary filebtn ${xrBusy?'busy':''}">${xrBusy?'Uploading…':'Take photo or choose X-ray'}<input type="file" id="xr-file" accept="image/*,application/pdf" multiple ${xrBusy?'disabled':''}></label>
     <p class="small muted" style="margin:0">On a phone you can photograph the X-ray screen or film, or pick images and PDFs from Photos or Files. Large photos are reduced to about 3000 pixels to save space.</p>
   </section>
+  ${cameraPanel()}
+  ${folderPanel()}
   <section class="panel">
     <h2>X-rays · ${xrays.length}</h2>
     ${xrLoading&&!xrays.length?'<div class="empty">Loading…</div>':xrays.length?`<div class="xgrid">${xrays.map(x=>`<button class="xcard" data-xr="${x.id}">
@@ -529,12 +685,103 @@ function mhStatus(p){
 /* ---------- screens ---------- */
 function render(){
   const app=$('#app');const s=view.screen;
-  const v={config:configView,offline:offlineView,loading:loadingView,error:errorView,auth:authView,newpw:newpwView,onboard:onboardView,recovery:recoveryView,list:listView,appts:apptsView,settings:settingsView,patient:patientView}[s]||loadingView;
-  app.innerHTML=v();
+  const v={config:configView,offline:offlineView,loading:loadingView,error:errorView,auth:authView,newpw:newpwView,onboard:onboardView,recovery:recoveryView,welcome:welcomeView,list:listView,appts:apptsView,msgs:msgsView,settings:settingsView,patient:patientView}[s]||loadingView;
+  const inShell=['list','appts','msgs','settings','patient'].includes(s)&&clinic&&me;
+  app.innerHTML=inShell?shell(v()):`<div class="wrap">${v()}${['auth','onboard','newpw','recovery','config'].includes(s)?CREDIT:''}</div>`;
+  if(view.screen==='msgs'){const cl=document.getElementById('chatList');if(cl)cl.scrollTop=cl.scrollHeight}
+  if(document.querySelector('.credit-qr'))fillQR();
+  const cv=document.getElementById('camVideo');if(cv&&camStream&&cv.srcObject!==camStream){cv.srcObject=camStream;cv.play().catch(()=>{})}
+  if(camStream&&!(view.screen==='patient'&&view.tab==='xrays'))stopCamera();
 }
+const DESIGNER_EMAIL='abid.26.am@gmail.com';
+const CREDIT=`<div class="credit"><div class="credit-qr" title="Scan to email Dr Abid Ali"></div><div class="credit-txt"><span>Made and designed by</span><b>Dr Abid Ali</b><span>Forensic Odontologist</span></div></div>`;
+/* QR code with the designer's email, drawn by the qrcodejs library (loaded only when needed). */
+let qrLib=null;
+function fillQR(){
+  const boxes=[...document.querySelectorAll('.credit-qr')].filter(b=>!b.childElementCount);if(!boxes.length)return;
+  const draw=()=>boxes.forEach(b=>{try{new window.QRCode(b,{text:'mailto:'+DESIGNER_EMAIL,width:88,height:88,colorDark:'#123c44',colorLight:'#ffffff',correctLevel:window.QRCode.CorrectLevel.M});b.setAttribute('role','img');b.setAttribute('aria-label','QR code: email '+DESIGNER_EMAIL)}catch(e){b.remove()}});
+  if(window.QRCode)return draw();
+  if(!qrLib)qrLib=new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)});
+  qrLib.then(draw,()=>boxes.forEach(b=>b.remove()));
+}
+function shell(content){
+  const s=view.screen,active=s==='appts'?'appts':s==='msgs'?'msgs':s==='settings'?'settings':'list';const un=unreadCount();
+  const lic=clinic.lic;const ini=(me.name||'?').replace(/^Dr\.?\s*/i,'').trim().slice(0,1).toUpperCase();
+  return `<div class="shell">
+  <aside class="sidebar" aria-label="Main menu">
+    <div class="side-brand">${toothMark()}<span>Clinic Patient Records</span></div>
+    ${clockHtml()}
+    <div class="side-clinic"><b>${esc(clinic.name)}</b>${lic&&lic.state==='trial'?`<span>Free trial · ${lic.daysLeft} day${lic.daysLeft>1?'s':''} left</span>`:lic&&lic.state==='expired'?'<span class="bad">Trial ended · read-only</span>':clinic.address?`<span>${esc(clinic.address)}</span>`:''}</div>
+    <nav class="side-nav">
+      <button class="${active==='list'?'on':''}" data-home="list">${icon('people')}<span>Patients</span><em>${db.patients.length}</em></button>
+      <button class="${active==='appts'?'on':''}" data-home="appts">${icon('calendar')}<span>Appointments</span></button>
+      <button class="${active==='msgs'?'on':''}" data-home="msgs">${icon('chat')}<span>Messages</span>${un?`<em class="badge">${un}</em>`:''}</button>
+      <button class="${active==='settings'?'on':''}" data-act="settings">${icon('gear')}<span>Clinic &amp; account</span></button>
+    </nav>
+    <div class="side-foot">
+      <div class="side-user"><span class="avatar" style="--h:${hueOf(me.name)}">${esc(ini)}</span><span><b>${esc(me.name)}</b><small>${ROLE_LABEL[me.role]||''}${loginAt?' · since '+hm(loginAt):''}</small></span></div>
+      ${syncBadge()}
+      <p class="side-credit">Made and designed by Dr Abid Ali, Forensic Odontologist</p>
+      <div class="row"><button class="side-btn" data-act="toggleSound" aria-pressed="${Sound.on}">${icon(Sound.on?'sound':'mute')}<span>Sound ${Sound.on?'on':'off'}</span></button><button class="side-btn" data-act="logout">${icon('logout')}<span>Log out</span></button></div>
+    </div>
+  </aside>
+  <main class="main"><div class="wrap">${content}</div></main>
+</div>`;
+}
+/* Attendance: each login starts a record; logout (or the last activity) ends it. */
+let attId=null,attT=null,attDay=null,attRows=null;
+let loginAt=null;
+async function startAttendance(){
+  if(!clinic||!me)return;loginAt=new Date().toISOString();
+  try{const {data:open}=await sb.from('attendance').select('*').eq('clinic_id',clinic.id).eq('user_id',user.id);
+    for(const r of (open||[]).filter(r=>!r.ended_at))await sb.from('attendance').update({ended_at:r.last_seen||r.started_at,auto:true}).eq('id',r.id);
+    const t0=new Date().toISOString();const {data}=await sb.from('attendance').insert({clinic_id:clinic.id,user_id:user.id,name:me.name,role:me.role,started_at:t0,last_seen:t0,ended_at:null});
+    attId=data&&data[0]&&data[0].id;}catch(e){}
+  clearInterval(attT);attT=setInterval(()=>{if(attId)sb.from('attendance').update({last_seen:new Date().toISOString()}).eq('id',attId)},5*60*1000);
+}
+async function endAttendance(){clearInterval(attT);if(attId){try{await sb.from('attendance').update({ended_at:new Date().toISOString(),last_seen:new Date().toISOString()}).eq('id',attId)}catch(e){}}attId=null}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&attId)sb.from('attendance').update({last_seen:new Date().toISOString()}).eq('id',attId)});
+async function loadAttendance(day){
+  const s=new Date(day+'T00:00:00'),e=new Date(s);e.setDate(e.getDate()+1);
+  const {data}=await sb.from('attendance').select('*').eq('clinic_id',clinic.id).gte('started_at',s.toISOString()).lt('started_at',e.toISOString()).order('started_at');
+  attRows=data||[];
+}
+const hm=t=>{const d=new Date(t);let h=d.getHours();const ap=h>=12?'PM':'AM';h=h%12||12;return h+':'+pad(d.getMinutes())+' '+ap};
+const dur=ms=>{const m=Math.max(0,Math.round(ms/60000));return Math.floor(m/60)+' h '+pad(m%60)+' min'};
+function attendancePanel(){
+  const day=attDay||today();
+  const rows=attRows||[];const per={};
+  rows.forEach(r=>{const end=r.ended_at||(r.id===attId?new Date().toISOString():r.last_seen||r.started_at);(per[r.user_id]=per[r.user_id]||{name:r.name,role:r.role,ms:0,first:r.started_at,last:end}).ms+=new Date(end)-new Date(r.started_at);per[r.user_id].last=end});
+  return `<section class="panel" id="attendance">
+    <div class="row"><h3>Attendance</h3><span class="spacer"></span><button class="btn small" data-attday="${shiftDay(day,-1)}" aria-label="Previous day">‹</button><input type="date" id="attPick" value="${day}" style="width:auto"><button class="btn small" data-attday="${shiftDay(day,1)}" aria-label="Next day">›</button></div>
+    <p class="small muted" style="margin:0">Recorded automatically when someone logs in and out on this device. If someone closes the app without logging out, their last activity is used.</p>
+    ${attRows===null?'<p class="small muted" style="margin:0">Loading…</p>':rows.length?`
+    <div class="att-sum">${Object.values(per).map(p=>`<div><span class="avatar" style="--h:${hueOf(p.name)}">${esc((p.name||'?').replace(/^Dr\.?\s*/i,'').slice(0,1))}</span><span><b>${esc(p.name)}</b><small>${hm(p.first)} – ${hm(p.last)} · ${dur(p.ms)}</small></span></div>`).join('')}</div>
+    <div class="tablewrap"><table class="att"><thead><tr><th>Name</th><th>Role</th><th>Logged in</th><th>Logged out</th><th>Time</th></tr></thead><tbody>
+    ${rows.map(r=>{const live=r.id===attId;const end=r.ended_at||(live?new Date().toISOString():r.last_seen||r.started_at);return `<tr><td>${esc(r.name)}</td><td>${ROLE_LABEL[r.role]||''}</td><td class="num">${hm(r.started_at)}</td><td class="num">${live?'<span class="pill ok">Now</span>':r.ended_at?hm(r.ended_at)+(r.auto?' <span class="small muted">(no log out)</span>':''):'<span class="small muted">'+hm(end)+' (last seen)</span>'}</td><td class="num">${dur(new Date(end)-new Date(r.started_at))}</td></tr>`}).join('')}
+    </tbody></table></div>`:'<p class="empty" style="margin:0">Nobody logged in on this day.</p>'}
+  </section>`;
+}
+function clockParts(){const d=new Date();let h=d.getHours();const ap=h>=12?'PM':'AM';h=h%12||12;
+  return{time:h+':'+pad(d.getMinutes()),ap,date:d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'}),short:d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'})}}
+function clockHtml(){const c=clockParts();return `<div class="clock" aria-live="off"><div class="clock-time"><b data-clock="time">${c.time}</b><span data-clock="ap">${c.ap}</span></div><div class="clock-date" data-clock="date">${c.date}</div></div>`}
+function clockMini(){const c=clockParts();return `<div class="clock-mini desk-hide"><span data-clock="short">${c.short}</span><b><span data-clock="time">${c.time}</span> <span data-clock="ap">${c.ap}</span></b></div>`}
+setInterval(()=>{const c=clockParts();document.querySelectorAll('[data-clock]').forEach(el=>{const v=c[el.dataset.clock];if(el.textContent!==v)el.textContent=v})},15000);
+function hueOf(s){let h=0;for(const ch of String(s||''))h=(h*31+ch.charCodeAt(0))%360;return [190,160,28,340,220,120,265,8][h%8]}
+function toothMark(){return `<svg viewBox="0 0 100 100" aria-hidden="true"><polygon points="4,4 96,4 68,32 32,32" fill="currentColor" opacity=".35"/><polygon points="4,96 96,96 68,68 32,68" fill="currentColor" opacity=".35"/><polygon points="4,4 32,32 32,68 4,96" fill="currentColor" opacity=".55"/><polygon points="96,4 68,32 68,68 96,96" fill="currentColor" opacity=".55"/><rect x="32" y="32" width="36" height="36" fill="currentColor"/></svg>`}
+function icon(n){const p={
+  people:'<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.2c2.6.2 4.3 1.8 4.8 4.8"/>',
+  calendar:'<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>',
+  sound:'<path d="M4 10v4h4l5 4V6L8 10H4z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11"/>',
+  mute:'<path d="M4 10v4h4l5 4V6L8 10H4z"/><path d="M17 9.5l4 5M21 9.5l-4 5"/>',
+  chat:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+  camera:'<path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  logout:'<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4M6 12h10"/>'}[n]||'';
+  return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`}
 const msgHtml=()=>view.msg?`<div class="msg ${view.msg.t}" role="alert">${esc(view.msg.m)}</div>`:'';
 const brand=()=>`<div class="brand"><svg viewBox="0 0 100 100" aria-hidden="true"><polygon points="4,4 96,4 68,32 32,32" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="5"/><polygon points="4,96 96,96 68,68 32,68" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="5"/><polygon points="4,4 32,32 32,68 4,96" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="5"/><polygon points="96,4 68,32 68,68 96,96" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="5"/><rect x="32" y="32" width="36" height="36" fill="var(--accent)"/></svg><div><b>Clinic Patient Records</b><span>Dental records for your clinic</span></div></div>`;
-function configView(){return `<div class="auth">${brand()}<section class="panel"><h2>Almost ready</h2><p style="margin:0">This app is not connected to its database yet. Open <b>app.js</b> and paste your Supabase <b>Project URL</b> and <b>anon public key</b> at the top, as shown in the setup guide.</p></section></div>`}
+function configView(){return `<div class="auth">${brand()}<section class="panel"><h2>Almost ready</h2><p style="margin:0">This app is not connected to its database yet. Open <b>config.js</b> and paste your Supabase <b>Project URL</b> and <b>anon public key</b>, as shown in the setup guide.</p></section></div>`}
 function offlineView(){return `<div class="auth">${brand()}<section class="panel"><h2>Can't connect</h2><p style="margin:0">The app could not load. Check your internet connection, then reload the page.</p><div class="row"><button class="btn primary" data-act="reload">Reload</button></div></section></div>`}
 function loadingView(){return `<div class="auth">${brand()}<p class="muted" style="text-align:center">Loading…</p></div>`}
 function errorView(){return `<div class="auth">${brand()}${msgHtml()}<div class="row"><button class="btn primary" data-act="reload">Try again</button><button class="btn" data-act="logout">Log out</button></div></div>`}
@@ -597,9 +844,10 @@ function listView(){
   const list=db.patients.filter(p=>(p.first+' '+p.last+' '+(p.phone||'')+' '+(p.cnic||'')).toLowerCase().includes(q))
    .sort((a,b)=>(a.last||'').localeCompare(b.last||''));
   return `
+  ${clockMini()}
   <header class="top">
-    <div style="min-width:0"><h1>${esc(clinic.name)}</h1><div class="sub">${db.patients.length} patient${db.patients.length===1?'':'s'} · ${esc(me.name)} ${syncBadge()}${LOCAL&&clinic.lic&&clinic.lic.state==='trial'?`<span class="pill warn">Trial · ${clinic.lic.daysLeft} day${clinic.lic.daysLeft>1?'s':''} left</span>`:''}</div></div>
-    <button class="btn small" data-act="settings">Clinic & account</button>
+    <div style="min-width:0"><h1>${esc(clinic.name)}</h1><div class="sub">${db.patients.length} patient${db.patients.length===1?'':'s'} · ${esc(me.name)} ${syncBadge()}${clinic.lic&&clinic.lic.state==='trial'?`<span class="pill warn">Trial · ${clinic.lic.daysLeft} day${clinic.lic.daysLeft>1?'s':''} left</span>`:''}</div></div>
+    <button class="btn small desk-hide" data-act="settings">Clinic & account</button>
   </header>
   ${homeNav('list')}
   ${deviceBanner()}
@@ -611,7 +859,7 @@ function listView(){
     ${list.length?`<div class="plist">${list.map(p=>{
       const al=alertsOf(p),ms=mhStatus(p),open=p.plan.filter(i=>i.status!=='completed').length;
       return `<button class="pitem" data-open="${p.id}">
-        <span class="avatar">${esc(((p.first||' ')[0]+(p.last||' ')[0]).trim())}</span>
+        <span class="avatar" style="--h:${hueOf(p.first+p.last)}">${esc(((p.first||' ')[0]+(p.last||' ')[0]).trim())}</span>
         <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
           <span class="nm">${esc(p.last)}, ${esc(p.first)} ${p.example?'<span class="pill warn">Example</span>':''}</span>
           <span class="meta">${p.dob?fmtDate(p.dob)+' · '+age(p.dob)+' yrs':'No date of birth'}${p.phone?' · '+esc(p.phone):''}${open?' · '+open+' item'+(open>1?'s':'')+' to do':''}</span>
@@ -624,10 +872,11 @@ function listView(){
 function settingsView(){
   const admin=isAdmin();const oldLocal=lsGet('clinicRecords.v1');
   return `
-  <header class="top"><button class="btn small" data-act="back">← Patients</button>${syncBadge()}</header>
+  <header class="top desk-hide"><button class="btn small" data-act="back">← Patients</button>${syncBadge()}</header>
   <h1>Clinic & account</h1>
+  <section class="panel desk-hide"><div class="row"><span>Sounds</span><span class="spacer"></span><button class="btn small" data-act="toggleSound">${Sound.on?'Sound on – turn off':'Sound off – turn on'}</button></div></section>
   ${msgHtml()}
-  ${LOCAL?activationPanel(admin):''}
+  ${activationPanel(admin)}
   <form class="panel" id="clinicForm">
     <h3>Clinic details</h3>
     <label class="f"><span>Clinic name</span><input type="text" id="cl-name" value="${esc(clinic.name)}" ${admin?'':'readonly'} required></label>
@@ -638,6 +887,7 @@ function settingsView(){
     ${admin?'<div class="row"><button class="btn primary" type="submit">Save clinic details</button></div>':'<p class="small muted" style="margin:0">Only a clinic admin can change these.</p>'}
   </form>
   ${LOCAL?addDentistHtml(admin):''}
+  ${admin||isAcct()?attendancePanel():''}
   ${LOCAL&&admin?recoveryPanel():''}
   <section class="panel" ${LOCAL?'hidden':''}>
     <h3>Invite dentists</h3>
@@ -685,9 +935,9 @@ function settingsView(){
     ${admin?`<label class="f"><span>Import patients from a backup file</span><input type="file" id="importFile" accept=".json,application/json"></label>`:''}
     ${admin&&oldLocal?`<div class="row"><button class="btn small" data-act="importLocal">Bring in records saved on this device by the earlier app</button></div>`:''}
   </section>
-  ${LOCAL&&admin?`<section class="panel">
+  ${admin?`<section class="panel">
     <h3>Delete clinic</h3>
-    <p class="small" style="margin:0">Deletes the clinic, all patients, X-rays, appointments and logins from this device for good. Save a full backup first if you may need the records later. A new clinic gets a new clinic code, so an old activation key won't work for it.</p>
+    <p class="small" style="margin:0">Deletes the clinic with all patients, X-rays, appointments and messages${LOCAL?' (and all logins) from this device':' for every computer in the clinic'}, for good. Save a full backup first if you may need the records later. A new clinic gets a new clinic code, so an old activation key won't work for it.</p>
     ${view.confirm==='wipe'?`<p class="small" style="margin:0">To protect patient records, deleting needs a <b>deletion code</b> from the seller. Send your clinic code <b>${esc(clinic.clinic_code||'')}</b> to ask for one. A code works for about 2 days.</p>
       ${SELLER.whatsapp?`<div class="row"><a class="btn wa" href="https://wa.me/${String(SELLER.whatsapp).replace(/\D/g,'').replace(/^0/,'92')}?text=${encodeURIComponent('Assalam-o-Alaikum, I want to delete my clinic in Clinic Patient Records.\nClinic name: '+clinic.name+'\nClinic code: '+(clinic.clinic_code||''))}" target="_blank" rel="noopener">Request code on WhatsApp</a></div>`:''}
       <label class="f"><span>Deletion code</span><textarea id="wipe-code" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste the deletion code (starts with CPR1-)"></textarea></label>
@@ -711,18 +961,31 @@ function recoveryView(){
     <button class="btn primary" data-act="rcDone">Continue</button>
   </section></div>`;
 }
+let showWelcome=false;
+function greeting(){const h=new Date().getHours();return h<12?'Good morning':h<17?'Good afternoon':'Good evening'}
+function welcomeView(){
+  return `<div class="welcome">
+    <div class="welcome-card">
+      <div class="welcome-mark">${toothMark()}</div>
+      <p class="welcome-hi">${greeting()}, ${esc(me.name)}</p>
+      <h1>Welcome to ${esc(clinic.name)}</h1>
+      <p class="muted" style="margin:0">${clockParts().date}</p>
+      <button class="btn primary" data-act="enterApp">Open patient records</button>
+    </div>
+    ${CREDIT}
+  </div>`;
+}
 function deviceBanner(){
-  if(!LOCAL)return '';
   const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
   const standalone=navigator.standalone||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
   const last=+lsGet('lastFullBackup')||0,old=!last||Date.now()-last>7*864e5;let h='';
-  if(ios&&!standalone)h+=`<div class="msg warn">Add this app to your Home Screen (Share → Add to Home Screen) and always open it from there. Safari and the Home Screen app keep separate records, and Safari can delete records of a site you don't open for 7 days.</div>`;
+  if(LOCAL&&ios&&!standalone)h+=`<div class="msg warn">Add this app to your Home Screen (Share → Add to Home Screen) and always open it from there. Safari and the Home Screen app keep separate records, and Safari can delete records of a site you don't open for 7 days.</div>`;
   const lic=clinic.lic||{};
   if(lic.state==='expired')h+=`<div class="msg err">Your free trial has ended. You can still view records and save backups, but not add or change anything. <button class="linkbtn" data-act="goActivate">Activate the app</button></div>`;
   else if(lic.state==='trial'&&lic.daysLeft<=5)h+=`<div class="msg warn">Free trial: ${lic.daysLeft} day${lic.daysLeft>1?'s':''} left. <button class="linkbtn" data-act="goActivate">Activate the app</button></div>`;
-  if(isAdmin()&&!clinic.has_recovery)h+=`<div class="msg warn">Set up an admin recovery code, so a forgotten admin password can be reset. <button class="linkbtn" data-act="settings">Set it up</button></div>`;
+  if(LOCAL&&isAdmin()&&!clinic.has_recovery)h+=`<div class="msg warn">Set up an admin recovery code, so a forgotten admin password can be reset. <button class="linkbtn" data-act="settings">Set it up</button></div>`;
   if(dailyBlob&&!backedUpToday())h+=`<div class="msg ${old?'warn':'ok'}"><div class="row" style="justify-content:space-between"><span>${old?(last?'No backup file for over a week. ':'No backup file yet. '):''}Today's backup is ready (${dailyBlob.size>=1e6?(dailyBlob.size/1e6).toFixed(1)+' MB':Math.max(1,Math.round(dailyBlob.size/1e3))+' KB'}).</span><button class="btn small primary" data-act="saveDaily">Save to Files</button></div></div>`;
-  else if(old&&db.patients.length)h+=`<div class="msg warn">${last?'Your last full backup was more than a week ago.':'You have no backup yet.'} Records are only on this device. <button class="linkbtn" data-act="settings">Save a backup</button></div>`;
+  else if(LOCAL&&old&&db.patients.length)h+=`<div class="msg warn">${last?'Your last full backup was more than a week ago.':'You have no backup yet.'} Records are only on this device. <button class="linkbtn" data-act="settings">Save a backup</button></div>`;
   return h;
 }
 function activationPanel(admin){
@@ -985,7 +1248,7 @@ document.addEventListener('submit',async e=>{
       view.email=v('li-email');
       if(!v('li-email')||!$('#li-pw').value)throw new Error('Enter your email and password.');
       const {data,error}=await sb.auth.signInWithPassword({email:v('li-email'),password:$('#li-pw').value});if(error)throw error;
-      user=data.user;await afterLogin();return;
+      user=data.user;showWelcome=true;await afterLogin();return;
     }
     if(f.id==='signupForm'){
       if(!v('su-name'))throw new Error('Enter your name.');
@@ -993,7 +1256,7 @@ document.addEventListener('submit',async e=>{
       const {data,error}=await sb.auth.signUp({email:v('su-email'),password:$('#su-pw').value,options:{data:{full_name:v('su-name')},emailRedirectTo:location.origin+location.pathname}});
       if(error)throw error;
       if(!data.session){view.email=v('su-email');view.authTab='login';view.msg={t:'ok',m:'Account created. Check your email and tap the confirmation link, then log in.'};render();return}
-      user=data.user;await afterLogin();return;
+      user=data.user;showWelcome=true;await afterLogin();return;
     }
     if(f.id==='newpwForm'){
       if($('#np-pw').value.length<8)throw new Error('Password must be at least 8 characters.');
@@ -1004,12 +1267,16 @@ document.addEventListener('submit',async e=>{
       if(!v('cc-name'))throw new Error('Enter the clinic name.');
       const {data,error}=await sb.rpc('create_clinic',{p_name:v('cc-name'),p_address:v('cc-address'),p_phone:v('cc-phone'),p_my_name:v('cc-me')});if(error)throw error;
       let rc=null;if(LOCAL){const r=await sb.rpc('new_recovery_code',{p_clinic:data});rc=r.data}
-      await afterLogin(data);if(rc){view.recoveryCode=rc;view.screen='recovery';render()}else toast('Clinic created');return;
+      showWelcome=!rc;await afterLogin(data);if(rc){view.recoveryCode=rc;view.screen='recovery';render()}else toast('Clinic created');return;
     }
     if(f.id==='joinForm'){
       if(!v('jc-code'))throw new Error('Enter the invite code.');
       const {data,error}=await sb.rpc('join_clinic',{p_code:v('jc-code'),p_my_name:v('jc-me')});if(error)throw error;
-      toast('You joined the clinic');await afterLogin(data);return;
+      showWelcome=true;await afterLogin(data);toast('You joined the clinic');return;
+    }
+    if(f.id==='msgForm'){
+      const txt=$('#msg-text').value.trim();if(!txt)throw new Error('Write a message first.');
+      view.msgTo=$('#msg-to').value;await sendMessage(view.msgTo,txt);render();const cl=$('#chatList');if(cl)cl.scrollTop=cl.scrollHeight;toast('Message sent');return;
     }
     if(f.id==='activateForm'){
       const {error}=await sb.rpc('activate',{p_clinic:clinic.id,p_key:$('#act-key').value});if(error)throw error;
@@ -1065,21 +1332,33 @@ document.addEventListener('click',async e=>{
     save();render();return}
   const b=e.target.closest('button');if(!b)return;
   const p=P(),d=b.dataset;
-  if(d.home){view=Object.assign(view,{screen:d.home,pid:null,confirm:null,msg:null});if(d.home==='appts'){view.day=view.day||today();apptsDay=[];render();refreshAppts();}else render();return}
+  if(d.home){stopXrWatch();stopCamera();view=Object.assign(view,{screen:d.home,pid:null,confirm:null,msg:null});
+    if(d.home==='appts'){view.day=view.day||today();apptsDay=[];render();refreshAppts();}
+    else if(d.home==='msgs'){await loadMessages();try{await loadDay(today())}catch(e){}view.day=view.day||today();render();const hadUnread=unreadCount();await markRead();if(hadUnread)render();const cl=$('#chatList');if(cl)cl.scrollTop=cl.scrollHeight;}
+    else render();return}
+  if(d.month){view.month=d.month;await loadMonth(d.month);render();return}
+  if(d.arrived){const a=apptsDay.find(x=>x.id===d.arrived);if(!a)return;const p=db.patients.find(x=>x.id===a.patient_id);
+    const {error}=await sb.from('appointments').update({status:'arrived'}).eq('id',a.id);if(error){toast(friendly(error));return}a.status='arrived';
+    try{await sendMessage(a.dentist_id&&a.dentist_id!==user.id?a.dentist_id:'all',(p?p.first+' '+p.last:'Patient')+' has arrived for '+(a.reason||'the appointment')+' at '+hhmm(a.starts_at)+'.',{kind:'arrived',patient_id:a.patient_id})}catch(e){}
+    toast((p?p.first:'Patient')+' marked as arrived – dentist notified');render();return}
   if(d.day){view.day=d.day;view.confirm=null;render();refreshAppts();return}
   if(d.sms){sendReminder(d.sms,'sms');return}
   if(d.wa){sendReminder(d.wa,'wa');return}
   if(d.ast){const {error}=await sb.from('appointments').update({status:d.ast}).eq('id',d.aid);if(error){toast(friendly(error));return}[apptsDay,apptsPatient].forEach(l=>{const x=l.find(y=>y.id===d.aid);if(x)x.status=d.ast});render();return}
   if(d.xr){xrView=d.xr;view.xrf={b:100,c:100,inv:false,zoom:false};view.confirm=null;view.xrBlob=null;render();
     const x0=xrays.find(y=>y.id===d.xr);if(x0)sb.storage.from('xrays').download(x0.path).then(r=>{if(xrView===d.xr&&r.data)view.xrBlob=r.data});return}
+  if(d.xradd!==undefined){const x=xrFound[+d.xradd];if(!x)return;if(isAcct()){toast('Accountants can view X-rays but not add them.');return}
+    rememberSeen(x.key);xrFound=xrFound.filter(y=>y!==x);await uploadXrays([x.file]);return}
+  if(d.xrskip!==undefined){const x=xrFound[+d.xrskip];if(x){rememberSeen(x.key);xrFound=xrFound.filter(y=>y!==x);render()}return}
+  if(d.attday){attDay=d.attday;attRows=null;render();await loadAttendance(attDay);render();return}
   if(d.asksnap){view.confirm='snap:'+d.asksnap;render();return}
   if(d.snaprestore){try{await window.__LOCAL_DB.restoreSnapshot(d.snaprestore);toast('Records restored to '+fmtDate(d.snaprestore));setTimeout(()=>location.reload(),700)}catch(err){toast(friendly(err))}return}
   if(d.askpw){view.confirm='pw:'+d.askpw;render();const i=$('#rp-pw');if(i)i.focus();return}
   if(d.askadel){view.confirm='adel:'+d.askadel;render();return}
   if(d.adel){const {error}=await sb.from('appointments').delete().eq('id',d.adel);if(error){toast(friendly(error));return}apptsDay=apptsDay.filter(a=>a.id!==d.adel);apptsPatient=apptsPatient.filter(a=>a.id!==d.adel);view.confirm=null;render();toast('Appointment deleted');return}
   if(d.authtab){view.authTab=d.authtab;view.msg=null;render();return}
-  if(d.open){xrView=null;if(view.screen==='appts')view.backTo='appts';else view.backTo='list';view=Object.assign(view,{screen:'patient',pid:d.open,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();scrollTo(0,0);return}
-  if(d.tab){view.tab=d.tab;view.tooth=null;view.addItem=null;view.confirm=null;if(d.tab==='appts'){apptsPatient=[];apptsLoading=true;render();refreshAppts();}else if(d.tab==='xrays'){xrays=[];xrView=null;render();refreshXrays();}else render();return}
+  if(d.open){xrView=null;stopXrWatch();if(view.screen==='appts')view.backTo='appts';else view.backTo='list';view=Object.assign(view,{screen:'patient',pid:d.open,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();scrollTo(0,0);return}
+  if(d.tab){view.tab=d.tab;view.tooth=null;view.addItem=null;view.confirm=null;if(d.tab==='appts'){apptsPatient=[];apptsLoading=true;render();refreshAppts();}else if(d.tab==='xrays'){xrays=[];xrView=null;render();refreshXrays();startXrWatch();}else{stopXrWatch();render();}return}
   if(d.mh){p.mh.answers[d.mh]=Object.assign(p.mh.answers[d.mh]||{},{v:d.v});save();render();return}
   if(d.tooth){view.tooth=+d.tooth===view.tooth?null:+d.tooth;view.confirm=null;render();const ed=$('#editor');if(ed)ed.scrollIntoView({block:'nearest'});return}
   if(d.mode){view.mode=d.mode;render();return}
@@ -1096,7 +1375,8 @@ document.addEventListener('click',async e=>{
   switch(d.act){
     case 'reload':location.reload();break;
     case 'showRecover':view.email=$('#li-email')?$('#li-email').value:'';view.showRecover=!view.showRecover;view.msg=null;render();break;
-    case 'rcDone':if(!$('#rc-ok').checked){toast('Tick the box once you have saved the code');break;}view.recoveryCode=null;clinic.has_recovery=true;view.screen='list';render();toast('Clinic created');break;
+    case 'rcDone':if(!$('#rc-ok').checked){toast('Tick the box once you have saved the code');break;}view.recoveryCode=null;clinic.has_recovery=true;view.screen='welcome';render();Sound.play('success');break;
+    case 'enterApp':view.screen='list';render();break;
     case 'askRecovery':view.confirm='newrc';render();break;
     case 'makeRecovery':{const {data,error}=await sb.rpc('new_recovery_code',{p_clinic:clinic.id});if(error){toast(friendly(error));break;}
       view.newRecovery=data;view.confirm=null;clinic.has_recovery=true;const m=memberships.find(x=>x.clinic_id===clinic.id);if(m)m.clinics.has_recovery=true;render();break;}
@@ -1104,11 +1384,29 @@ document.addEventListener('click',async e=>{
     case 'copyClinicCode':{const c=clinic.clinic_code;const sel=()=>{const r=document.createRange();r.selectNodeContents($('#ccode'));const s=getSelection();s.removeAllRanges();s.addRange(r);toast('Code selected – copy it')};
       try{navigator.clipboard.writeText(c).then(()=>toast('Clinic code copied'),sel)}catch(err){sel()}break;}
     case 'askWipe':view.confirm='wipe';render();break;
-    case 'wipe':{if(!isAdmin())break;const problem=await window.__LOCAL_DB.checkDeleteCode(clinic.id,$('#wipe-code').value);
+    case 'wipe':{if(!isAdmin())break;const code=$('#wipe-code').value;
+      if(!LOCAL){const chk=await sb.rpc('check_delete_code',{p_clinic:clinic.id,p_key:code});if(chk.error){toast(friendly(chk.error)+' Nothing was deleted.');break;}
+        const {data:xs}=await sb.from('xrays').select('path').eq('clinic_id',clinic.id);const paths=(xs||[]).map(x=>x.path);
+        for(let i=0;i<paths.length;i+=100)await sb.storage.from('xrays').remove(paths.slice(i,i+100));
+        const del=await sb.rpc('delete_clinic',{p_clinic:clinic.id,p_key:code});if(del.error){toast(friendly(del.error));break;}
+        lsSet('clinicId','');toast('Clinic deleted');if(chan)sb.removeChannel(chan);chan=null;clinic=null;await afterLogin();break;}
+      const problem=await window.__LOCAL_DB.checkDeleteCode(clinic.id,code);
       if(problem){toast(problem+' Nothing was deleted.');break;}
       await window.__LOCAL_DB.wipeAll();try{localStorage.removeItem('lastFullBackup');localStorage.removeItem('clinicId')}catch(e){}
       toast('Clinic deleted');setTimeout(()=>location.reload(),700);break;}
     case 'saveDaily':{const bl=dailyBlob;if(!bl)break;deliverFile(bl,('Backup_'+clinic.name+'_'+today()+'.json').replace(/[^\w.\-]+/g,'_'),'save').then(ok=>{if(ok){lsSet('lastFullBackup',String(Date.now()));dailyBlob=null;toast('Backup saved');render()}},()=>toast('Could not save the backup'));break;}
+    case 'camStart':{const k=$('#xr-kind');if(k&&!/photo/i.test(k.value)){k.value='Microscope photo'}view.xrKind=k?k.value:view.xrKind;await startCamera(view.camId);break;}
+    case 'camStop':stopCamera();render();break;
+    case 'camShot':{const v=$('#camVideo');if(!v||!v.videoWidth){toast('The camera picture is not ready yet');break;}
+      if(isAcct()){toast('Accountants can view X-rays but not add them.');break;}
+      const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);
+      const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.92));const f=new File([blob],'microscope_'+Date.now()+'.jpg',{type:'image/jpeg'});
+      const flash=$('.cam-box');if(flash){flash.classList.add('flash');setTimeout(()=>flash.classList.remove('flash'),250)}
+      view.xrKind=$('#xr-kind').value;await uploadXrays([f]);const v2=$('#camVideo');if(v2&&camStream){v2.srcObject=camStream;v2.play().catch(()=>{})}break;}
+    case 'xrConnect':{try{const h=await window.showDirectoryPicker({id:'xray-folder',mode:'read'});xrDir=h;await devStore.set('xrayDir',h);xrDirState='ok';xrWatchFrom=Date.now()-15*60*1000;toast('X-ray folder connected');render();scanXrayFolder()}catch(err){if(err&&err.name!=='AbortError')toast('Could not open that folder')}break;}
+    case 'xrAllow':{try{const r=await xrDir.requestPermission({mode:'read'});xrDirState=r==='granted'?'ok':'ask';render();scanXrayFolder()}catch(err){toast('Could not get access to the folder')}break;}
+    case 'xrShowRecent':xrWatchFrom=Date.now()-3*864e5;await scanXrayFolder();if(!xrFound.length)toast('No new images in the last 3 days');render();break;
+    case 'toggleSound':Sound.toggle();render();break;
     case 'showUsers':view.email=$('#li-email')?$('#li-email').value:'';view.showUsers=!view.showUsers;render();break;
     case 'fullBackup':{view.backupBusy=true;render();try{const data=await window.__LOCAL_DB.exportAll();view.backupBlob=new Blob([JSON.stringify(data)],{type:'application/json'});}catch(err){toast('Could not prepare the backup')}view.backupBusy=false;render();break;}
     case 'shareBackup':{const bl=view.backupBlob;if(!bl)break;deliverFile(bl,('Full_Backup_'+clinic.name+'_'+today()+'.json').replace(/[^\w.\-]+/g,'_'),'save').then(ok=>{if(ok){lsSet('lastFullBackup',String(Date.now()));view.backupBlob=null;toast('Backup saved – keep it in iCloud Drive or Google Drive');render()}},()=>toast('Could not save the backup'));break;}
@@ -1124,13 +1422,13 @@ document.addEventListener('click',async e=>{
       const data=view.xrBlob;if(!data){toast('Still loading the image – try again in a moment');break;}
       const pp=P();const fn=((pp?pp.last+'_'+pp.first+'_':'')+x.kind+'_'+x.taken_on+'.'+(x.path.split('.').pop())).replace(/[^\w.\-]+/g,'_');
       deliverFile(data,fn,'save').then(ok=>{if(ok)toast('X-ray ready to save')},()=>toast('Could not share the file'));break;}
-    case 'logout':if(dirty.size)await flush();await sb.auth.signOut();break;
+    case 'logout':if(dirty.size)await flush();await endAttendance();await sb.auth.signOut();break;
     case 'forgot':{const em=$('#li-email')?$('#li-email').value.trim():'';if(!em){view.msg={t:'err',m:'Type your email above first, then tap “Forgot password?”.'};render();break;}
       const {error}=await sb.auth.resetPasswordForEmail(em,{redirectTo:location.origin+location.pathname});
       view.msg=error?{t:'err',m:friendly(error)}:{t:'ok',m:'If that email has an account, a reset link is on its way. Open it on this device.'};render();break;}
     case 'back':if(view.screen==='patient'&&view.backTo==='appts'){view=Object.assign(view,{screen:'appts',pid:null,confirm:null});render();refreshAppts();break;}
       view=Object.assign(view,{screen:memberships.length?'list':'onboard',pid:null,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();break;
-    case 'settings':view.newRecovery=null;if(LOCAL){snapList=null;window.__LOCAL_DB.listSnapshots().then(l=>{snapList=l;if(view.screen==='settings')softRender()})}view.screen='settings';view.confirm=null;view.msg=null;render();loadTeam().then(()=>{if(view.screen==='settings')softRender()});break;
+    case 'settings':view.newRecovery=null;if(isAdmin()||isAcct()){attRows=null;loadAttendance(attDay||today()).then(()=>{if(view.screen==='settings')softRender()})}if(LOCAL){snapList=null;window.__LOCAL_DB.listSnapshots().then(l=>{snapList=l;if(view.screen==='settings')softRender()})}view.screen='settings';view.confirm=null;view.msg=null;render();loadTeam().then(()=>{if(view.screen==='settings')softRender()});break;
     case 'onboard':view.screen='onboard';view.msg=null;render();break;
     case 'newPatient':{const np=blankPatient();db.patients.push(np);markDirty(np.id);view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
     case 'example':{const np=sample();np.notes[0].by=me.name;db.patients.push(np);markDirty(np.id);render();toast('Example patient added');break;}
@@ -1187,11 +1485,13 @@ document.addEventListener('change',async e=>{
     view.restoreData=d;view.restoreInfo=(d.clinics||[]).join(', ')+' from '+fmtDate(String(d.exported||'').slice(0,10));view.confirm='restore';render();}catch(err){toast('That file is not a full backup from this app')}el.value='';return}
   if(el.id==='xr-file'&&el.files&&el.files.length&&isAcct()){toast('Accountants can view X-rays but not add them.');el.value='';return}
   if(el.id==='xr-file'&&el.files&&el.files.length){view.xrKind=$('#xr-kind').value;await uploadXrays([...el.files]);return}
+  if(el.id==='camSel'){await startCamera(el.value);return}
+  if(el.id==='attPick'&&el.value){attDay=el.value;attRows=null;render();await loadAttendance(attDay);render();return}
   if(el.id==='dayPick'&&el.value){view.day=el.value;render();refreshAppts();return}
   if(el.dataset.roleuid){const {error}=await sb.rpc('set_member_role',{p_clinic:clinic.id,p_user:el.dataset.roleuid,p_role:el.value});if(error){toast(friendly(error));await loadTeam();render();return}await loadTeam();render();toast('Role changed');return}
   if(el.id==='switchClinic'){const m=memberships.find(x=>x.clinic_id===el.value);if(m)await openClinic(m);return}
-  if(el.id==='importFile'&&el.files&&el.files[0]){try{const d=JSON.parse(await el.files[0].text());const list=Array.isArray(d)?d:(d.patients||[]);await importPatients(list);}catch(err){toast('That file is not a valid backup')}el.value='';return}
-  if(el.dataset.f||el.dataset.mhf==='signed'||el.dataset.bpe!==undefined)render();
+  if(el.id==='importFile'&&el.files&&el.files[0]){try{const d=JSON.parse(await el.files[0].text());const list=Array.isArray(d)?d:(d.patients||(d.tables&&d.tables.patients)||[]);await importPatients(list.filter(x=>!x.example));}catch(err){toast('That file is not a valid backup')}el.value='';return}
+  if((el.dataset.f&&(el.tagName==='SELECT'||el.type==='date'))||el.dataset.mhf==='signed'||el.dataset.bpe!==undefined)render();
 });
 document.addEventListener('input',e=>{
   const el=e.target;
