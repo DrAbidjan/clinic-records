@@ -3,6 +3,8 @@
    Everything is stored on this phone or computer (see local-db.js). Nothing to configure. */
 const CONFIG={SUPABASE_URL:'https://local.device',SUPABASE_ANON_KEY:'on-device-storage-no-key-needed'};
 const LOCAL=!!window.__LOCAL_DB;
+/* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
+const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -134,6 +136,8 @@ const configured=/^https:\/\//.test(CONFIG.SUPABASE_URL)&&CONFIG.SUPABASE_ANON_K
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,2400)}
 function P(){return db.patients.find(p=>p.id===view.pid)}
 const isAdmin=()=>me&&me.role==='admin';
+const isAcct=()=>me&&me.role==='accountant';
+const ROLE_LABEL={admin:'Admin',dentist:'Dentist',accountant:'Accountant'};
 const nameOf=id=>{const m=team.find(t=>t.user_id===id);return m?m.name:'another device'};
 function friendly(err){
   const m=(err&&(err.message||err.error_description))||String(err||'Something went wrong');
@@ -149,9 +153,15 @@ function friendly(err){
 /* ---------- sync ---------- */
 const dirty=new Set();let flushT=null,syncState='saved';
 function setSync(s){syncState=s;const el=$('#sync');if(el){el.className='sync '+s;el.textContent=syncText()}}
-function syncText(){return {saved:LOCAL?'Saved on this device':'All changes saved',saving:'Saving…',error:'Not saved – check internet'}[syncState]}
+function syncText(){if(readOnly())return 'Read-only';return {saved:LOCAL?'Saved on this device':'All changes saved',saving:'Saving…',error:LOCAL?'Not saved':'Not saved – check internet'}[syncState]}
 function syncBadge(){return `<span id="sync" class="sync ${syncState}" role="status">${syncText()}</span>`}
-function markDirty(id){if(!id)return;dirty.add(id);setSync('saving');clearTimeout(flushT);flushT=setTimeout(flush,700)}
+const readOnly=()=>LOCAL&&clinic&&clinic.lic&&clinic.lic.state==='expired';
+let roToastAt=0;
+function markDirty(id){if(!id)return;
+  if(isAcct()){if(Date.now()-roToastAt>4000){toast('Accountants can view and print, but not change patient records.');roToastAt=Date.now()}
+    loadPatients().then(()=>render()).catch(()=>{});return}
+  if(readOnly()){if(Date.now()-roToastAt>4000){toast('Read-only: the free trial has ended. Activate in Clinic & account.');roToastAt=Date.now()}
+    loadPatients().then(()=>render()).catch(()=>{});return}dirty.add(id);setSync('saving');clearTimeout(flushT);flushT=setTimeout(flush,700)}
 function save(){markDirty(view.pid)}
 function strip(p){const o=Object.assign({},p);delete o.id;delete o._upd;delete o._by;return o}
 let flushing=false;
@@ -162,6 +172,7 @@ async function flush(){
   if(!rows.length){flushing=false;setSync('saved');return}
   const {data,error}=await sb.from('patients').upsert(rows).select('id,updated_at,updated_by');
   flushing=false;
+  if(error&&error.code==='readonly'){setSync('saved');toast(error.message);try{await loadPatients()}catch(e){}render();return}
   if(error){ids.forEach(i=>dirty.add(i));setSync('error');flushT=setTimeout(flush,8000);return}
   (data||[]).forEach(r=>{const p=db.patients.find(x=>x.id===r.id);if(p){p._upd=r.updated_at;p._by=r.updated_by}});
   if(dirty.size){flushT=setTimeout(flush,300);setSync('saving')}else setSync('saved');
@@ -236,7 +247,7 @@ async function openClinic(m){
   subscribe();
   view={screen:'list',pid:null,tab:'details',tooth:null,q:'',confirm:null,msg:null,authTab:'login'};render();
 }
-async function refreshClinic(){const {data}=await sb.from('clinics').select('id,name,address,phone,invite_code,reminder_template').eq('id',clinic.id).single();if(data)clinic=data;}
+async function refreshClinic(){const {data}=await sb.from('clinics').select('id,name,address,phone,invite_code,reminder_template').eq('id',clinic.id).single();if(data){clinic=data;const m=memberships.find(x=>x.clinic_id===clinic.id);if(m)m.clinics=clinic;}}
 
 /* ---------- PDF record ---------- */
 function chartLines(p){
@@ -579,14 +590,14 @@ function listView(){
    .sort((a,b)=>(a.last||'').localeCompare(b.last||''));
   return `
   <header class="top">
-    <div style="min-width:0"><h1>${esc(clinic.name)}</h1><div class="sub">${db.patients.length} patient${db.patients.length===1?'':'s'} · ${esc(me.name)} ${syncBadge()}</div></div>
+    <div style="min-width:0"><h1>${esc(clinic.name)}</h1><div class="sub">${db.patients.length} patient${db.patients.length===1?'':'s'} · ${esc(me.name)} ${syncBadge()}${LOCAL&&clinic.lic&&clinic.lic.state==='trial'?`<span class="pill warn">Trial · ${clinic.lic.daysLeft} day${clinic.lic.daysLeft>1?'s':''} left</span>`:''}</div></div>
     <button class="btn small" data-act="settings">Clinic & account</button>
   </header>
   ${homeNav('list')}
   ${deviceBanner()}
   <div class="row">
     <input type="search" id="search" placeholder="Search name, phone or CNIC" value="${esc(view.q)}" style="flex:1;min-width:0">
-    <button class="btn primary" data-act="newPatient">+ New patient</button>
+    ${isAcct()?'':`<button class="btn primary" data-act="newPatient" ${readOnly()?'disabled':''}>+ New patient</button>`}
   </div>
   <section class="panel">
     ${list.length?`<div class="plist">${list.map(p=>{
@@ -608,6 +619,7 @@ function settingsView(){
   <header class="top"><button class="btn small" data-act="back">← Patients</button>${syncBadge()}</header>
   <h1>Clinic & account</h1>
   ${msgHtml()}
+  ${LOCAL?activationPanel(admin):''}
   <form class="panel" id="clinicForm">
     <h3>Clinic details</h3>
     <label class="f"><span>Clinic name</span><input type="text" id="cl-name" value="${esc(clinic.name)}" ${admin?'':'readonly'} required></label>
@@ -632,10 +644,10 @@ function settingsView(){
     <div class="plist">${team.map(t=>{const self=t.user_id===user.id;return `<div class="member">
       <span class="avatar">${esc((t.name||'?').replace(/^Dr\.?\s*/i,'').slice(0,1))}</span>
       <span style="flex:1;min-width:0"><b>${esc(t.name)}</b>${self?' <span class="muted small">(you)</span>':''}<br><span class="small muted">Joined ${fmtDate(String(t.joined_at).slice(0,10))}</span></span>
-      <span class="pill ${t.role==='admin'?'info':'ok'}">${t.role==='admin'?'Admin':'Dentist'}</span>
+      <span class="pill ${t.role==='admin'?'info':t.role==='accountant'?'warn':'ok'}">${ROLE_LABEL[t.role]||t.role}</span>
       ${admin&&!self?`<span class="row" style="gap:6px;width:100%;justify-content:flex-end">
         ${LOCAL?(view.confirm==='pw:'+t.user_id?`<form id="resetPwForm" class="row" style="width:100%;gap:6px" data-uid="${t.user_id}"><input type="password" id="rp-pw" placeholder="New password (8+ characters)" minlength="8" autocomplete="new-password" style="flex:1;min-width:0"><button class="btn small primary" type="submit">Save</button><button class="btn small" type="button" data-act="cancelConfirm">Cancel</button></form>`:`<button class="btn small" data-askpw="${t.user_id}">Reset password</button>`):''}
-        <button class="btn small" data-role="${t.role==='admin'?'dentist':'admin'}" data-uid="${t.user_id}">${t.role==='admin'?'Make dentist':'Make admin'}</button>
+        <select class="rolesel" data-roleuid="${t.user_id}" aria-label="Role of ${esc(t.name)}">${['dentist','accountant','admin'].map(r=>`<option value="${r}" ${t.role===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('')}</select>
         ${view.confirm==='rm:'+t.user_id?`<button class="btn small" data-act="cancelConfirm">Keep</button><button class="btn small danger" data-rm="${t.user_id}">Yes, remove</button>`:`<button class="btn small danger" data-askrm="${t.user_id}">Remove</button>`}
       </span>`:''}
     </div>`}).join('')}</div>
@@ -688,9 +700,32 @@ function deviceBanner(){
   const standalone=navigator.standalone||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
   const last=+lsGet('lastFullBackup')||0,old=!last||Date.now()-last>7*864e5;let h='';
   if(ios&&!standalone)h+=`<div class="msg warn">Add this app to your Home Screen (Share → Add to Home Screen) and always open it from there. Safari and the Home Screen app keep separate records, and Safari can delete records of a site you don't open for 7 days.</div>`;
+  const lic=clinic.lic||{};
+  if(lic.state==='expired')h+=`<div class="msg err">Your free trial has ended. You can still view records and save backups, but not add or change anything. <button class="linkbtn" data-act="goActivate">Activate the app</button></div>`;
+  else if(lic.state==='trial'&&lic.daysLeft<=5)h+=`<div class="msg warn">Free trial: ${lic.daysLeft} day${lic.daysLeft>1?'s':''} left. <button class="linkbtn" data-act="goActivate">Activate the app</button></div>`;
   if(isAdmin()&&!clinic.has_recovery)h+=`<div class="msg warn">Set up an admin recovery code, so a forgotten admin password can be reset. <button class="linkbtn" data-act="settings">Set it up</button></div>`;
   if(old&&db.patients.length)h+=`<div class="msg warn">${last?'Your last full backup was more than a week ago.':'You have no backup yet.'} Records are only on this device. <button class="linkbtn" data-act="settings">Save a backup</button></div>`;
   return h;
+}
+function activationPanel(admin){
+  const lic=clinic.lic||{};
+  const status=lic.state==='active'?`<span class="pill ok">Activated</span> <span class="small muted">for ${esc(lic.name||clinic.name)}${lic.date?' on '+fmtDate(lic.date):''}</span>`
+    :lic.state==='trial'?`<span class="pill warn">Free trial · ${lic.daysLeft} day${lic.daysLeft>1?'s':''} left</span>`:`<span class="pill alert">Trial ended · read-only</span>`;
+  const waNum=SELLER.whatsapp?String(SELLER.whatsapp).replace(/\D/g,'').replace(/^0/,'92'):'';
+  const waText=encodeURIComponent('Assalam-o-Alaikum, I want to activate Clinic Patient Records.\nClinic name: '+clinic.name+'\nClinic code: '+(clinic.clinic_code||''));
+  const seller=[SELLER.price&&('Price: <b>'+esc(SELLER.price)+'</b>, one-time payment, no monthly fees'),SELLER.whatsapp&&('WhatsApp'+(SELLER.name?' '+esc(SELLER.name):'')+': <b>'+esc(SELLER.whatsapp)+'</b>')].filter(Boolean).join('<br>');
+  return `<section class="panel" id="activation">
+    <h3>Activation</h3>
+    <div class="row">${status}</div>
+    ${lic.state==='active'?'':`
+    <p class="small" style="margin:0">To keep using the app after the trial, buy a one-time licence. Send your <b>clinic code</b> and clinic name to the seller; you receive an activation key for this clinic.</p>
+    ${seller?`<p class="small" style="margin:0">${seller}</p>`:''}
+    ${waNum?`<div class="row"><a class="btn wa" href="https://wa.me/${waNum}?text=${waText}" target="_blank" rel="noopener">Send code on WhatsApp</a></div>`:''}`}
+    <div class="row"><span class="small muted">Clinic code</span><span class="invite" id="ccode" style="font-size:1.1rem">${esc(clinic.clinic_code||'')}</span><button class="btn small" data-act="copyClinicCode">Copy</button></div>
+    ${lic.state==='active'?'':admin?`<form id="activateForm" style="display:flex;flex-direction:column;gap:8px">
+      <label class="f"><span>Activation key</span><textarea id="act-key" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste the key you received (starts with CPR1-)"></textarea></label>
+      <div class="row"><button class="btn primary" type="submit">Activate</button></div></form>`:'<p class="small muted" style="margin:0">Ask your clinic admin to enter the activation key.</p>'}
+  </section>`;
 }
 function recoveryPanel(){
   return `<section class="panel"><h3>Admin recovery code</h3>
@@ -703,17 +738,17 @@ function recoveryPanel(){
 function addDentistHtml(admin){
   if(!admin)return `<section class="panel"><h3>Dentists</h3><p class="small muted" style="margin:0">Your clinic admin adds dentists and resets passwords.</p></section>`;
   return `<form class="panel" id="addDentistForm">
-    <h3>Add a dentist</h3>
-    <p class="small muted" style="margin:0">Each dentist logs in on this device with their own username and password. Their name appears on the notes they write.</p>
+    <h3>Add a team member</h3>
+    <p class="small muted" style="margin:0">Each person logs in on this device with their own username and password. A dentist's name appears on the notes they write.</p>
     <div class="grid2">
-      <label class="f"><span>Name on records</span><input type="text" id="ad-name" placeholder="e.g. Dr Bilal Ahmed" required></label>
+      <label class="f"><span>Name on records</span><input type="text" id="ad-name" placeholder="e.g. Dr Bilal Ahmed or Imran (accounts)" required></label>
       <label class="f"><span>Username</span><input type="text" id="ad-user" autocapitalize="off" autocorrect="off" autocomplete="off" placeholder="e.g. bilal" required></label>
     </div>
     <div class="grid2">
       <label class="f"><span>Password (at least 8 characters)</span><input type="password" id="ad-pw" autocomplete="new-password" minlength="8" required></label>
-      <label class="f"><span>Role</span><select id="ad-role"><option value="dentist">Dentist</option><option value="admin">Admin (can add dentists)</option></select></label>
+      <label class="f"><span>Role</span><select id="ad-role"><option value="dentist">Dentist</option><option value="accountant">Accountant (view, print, appointments)</option><option value="admin">Admin (can add people)</option></select></label>
     </div>
-    <div class="row"><button class="btn primary" type="submit">Add dentist</button></div>
+    <div class="row"><button class="btn primary" type="submit">Add person</button></div>
   </form>`;
 }
 function localBackupHtml(admin){
@@ -731,10 +766,12 @@ function patientView(){
   const p=P();if(!p){view.screen='list';return listView();}
   const al=alertsOf(p),ms=mhStatus(p);
   const tabs=[['details','Details'],['mh','Medical history'],['chart','Chart'],['plan','Treatment plan'],['notes','Clinical notes'],['xrays','X-rays'],['appts','Appointments']];
-  const body={details:detailsTab,mh:mhTab,chart:chartTab,plan:planTab,notes:notesTab,xrays:xrayTab,appts:apptTab}[view.tab](p);
+  let body={details:detailsTab,mh:mhTab,chart:chartTab,plan:planTab,notes:notesTab,xrays:xrayTab,appts:apptTab}[view.tab](p);
+  if(isAcct()&&['details','mh','chart','plan'].includes(view.tab))body=`<fieldset class="ro" disabled>${body}</fieldset>`;
   return `
   <header class="top"><button class="btn small" data-act="back">← Patients</button>${syncBadge()}</header>
   ${p.example?'<span class="note-ex">Example record – delete it once you add real patients</span>':''}
+  ${isAcct()?'<span class="note-ex" style="color:var(--accent);background:var(--accent-soft)">Accountant view: you can see, print and save records and book appointments. Clinical changes are made by dentists.</span>':''}
   <div class="banner">
     <div class="row"><span class="nm">${esc(p.first)} ${esc(p.last)}</span><span class="spacer"></span><span class="small muted">${p.dob?fmtDate(p.dob)+' · '+age(p.dob)+' yrs':''}</span></div>
     <div class="alerts">${al.map(a=>`<span class="pill alert">⚠ ${esc(a)}</span>`).join('')}<span class="pill ${ms.cls}">${ms.t}</span></div>
@@ -951,6 +988,10 @@ document.addEventListener('submit',async e=>{
       const {data,error}=await sb.rpc('join_clinic',{p_code:v('jc-code'),p_my_name:v('jc-me')});if(error)throw error;
       toast('You joined the clinic');await afterLogin(data);return;
     }
+    if(f.id==='activateForm'){
+      const {error}=await sb.rpc('activate',{p_clinic:clinic.id,p_key:$('#act-key').value});if(error)throw error;
+      await refreshClinic();await loadPatients();toast('Activated – thank you!');
+    }
     if(f.id==='recoverForm'){
       view.email=v('rv-user');view.rvCode=v('rv-code');
       await window.__LOCAL_DB.recover(v('rv-user'),v('rv-code'),$('#rv-pw').value);
@@ -1034,6 +1075,9 @@ document.addEventListener('click',async e=>{
     case 'askRecovery':view.confirm='newrc';render();break;
     case 'makeRecovery':{const {data,error}=await sb.rpc('new_recovery_code',{p_clinic:clinic.id});if(error){toast(friendly(error));break;}
       view.newRecovery=data;view.confirm=null;clinic.has_recovery=true;const m=memberships.find(x=>x.clinic_id===clinic.id);if(m)m.clinics.has_recovery=true;render();break;}
+    case 'goActivate':view.screen='settings';view.newRecovery=null;view.confirm=null;view.msg=null;render();setTimeout(()=>{const a=$('#activation');if(a)a.scrollIntoView({block:'start'})},50);break;
+    case 'copyClinicCode':{const c=clinic.clinic_code;const sel=()=>{const r=document.createRange();r.selectNodeContents($('#ccode'));const s=getSelection();s.removeAllRanges();s.addRange(r);toast('Code selected – copy it')};
+      try{navigator.clipboard.writeText(c).then(()=>toast('Clinic code copied'),sel)}catch(err){sel()}break;}
     case 'showUsers':view.email=$('#li-email')?$('#li-email').value:'';view.showUsers=!view.showUsers;render();break;
     case 'fullBackup':{view.backupBusy=true;render();try{const data=await window.__LOCAL_DB.exportAll();view.backupBlob=new Blob([JSON.stringify(data)],{type:'application/json'});}catch(err){toast('Could not prepare the backup')}view.backupBusy=false;render();break;}
     case 'shareBackup':{const bl=view.backupBlob;if(!bl)break;deliverFile(bl,('Full_Backup_'+clinic.name+'_'+today()+'.json').replace(/[^\w.\-]+/g,'_'),'save').then(ok=>{if(ok){lsSet('lastFullBackup',String(Date.now()));view.backupBlob=null;toast('Backup saved – keep it in iCloud Drive or Google Drive');render()}},()=>toast('Could not save the backup'));break;}
@@ -1041,7 +1085,7 @@ document.addEventListener('click',async e=>{
     case 'xrClose':xrView=null;view.confirm=null;render();break;
     case 'xrInv':view.xrf.inv=!view.xrf.inv;render();break;
     case 'xrZoom':view.xrf.zoom=!view.xrf.zoom;render();break;
-    case 'xrAskDel':view.confirm='xrdel';render();break;
+    case 'xrAskDel':if(isAcct()){toast('Accountants can view X-rays but not delete them.');break;}view.confirm='xrdel';render();break;
     case 'xrDelete':{const x=xrays.find(y=>y.id===xrView);if(!x)break;
       const r1=await sb.from('xrays').delete().eq('id',x.id);if(r1.error){toast(friendly(r1.error));break;}
       await sb.storage.from('xrays').remove([x.path]);xrays=xrays.filter(y=>y.id!==x.id);xrView=null;view.confirm=null;render();toast('X-ray deleted');break;}
@@ -1059,7 +1103,7 @@ document.addEventListener('click',async e=>{
     case 'onboard':view.screen='onboard';view.msg=null;render();break;
     case 'newPatient':{const np=blankPatient();db.patients.push(np);markDirty(np.id);view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
     case 'example':{const np=sample();np.notes[0].by=me.name;db.patients.push(np);markDirty(np.id);render();toast('Example patient added');break;}
-    case 'askDelete':view.confirm='delete';render();break;
+    case 'askDelete':if(isAcct()){toast('Only dentists can delete patient records.');break;}view.confirm='delete';render();break;
     case 'cancelConfirm':view.confirm=null;render();break;
     case 'deletePatient':{const id=p.id;dirty.delete(id);
       try{const {data:xs}=await sb.from('xrays').select('path').eq('patient_id',id);if(xs&&xs.length)await sb.storage.from('xrays').remove(xs.map(x=>x.path));}catch(err){}const {error}=await sb.from('patients').delete().eq('id',id);if(error){toast(friendly(error));break;}
@@ -1083,7 +1127,7 @@ document.addEventListener('click',async e=>{
       if(f.doneDate){it.doneDate=f.doneDate;it.doneBy=f.doneBy}
       const ix=p.plan.findIndex(x=>x.id===it.id);if(ix>=0)p.plan[ix]=it;else p.plan.push(it);view.addItem=null;save();render();toast('Item saved');break;}
     case 'template':$('#n-text').value='C/O: \nMH: reviewed, no changes\nO/E: \nRadiographs: \nDx: \nTx: \nLA: \nPost-op advice given\nNext visit: ';break;
-    case 'addNote':{const t=$('#n-text').value.trim();if(!t){toast('Write the note first');break;}
+    case 'addNote':{if(isAcct()){toast('Clinical notes are written by dentists.');break;}const t=$('#n-text').value.trim();if(!t){toast('Write the note first');break;}
       p.notes.push({id:uid(),date:$('#n-date').value||today(),title:$('#n-title').value,by:me.name,text:t});save();render();toast('Note saved');break;}
     case 'copyCode':{const c=clinic.invite_code;
       const sel=()=>{const r=document.createRange();r.selectNodeContents($('#invite'));const s=getSelection();s.removeAllRanges();s.addRange(r);toast('Code selected – copy it')};
@@ -1110,8 +1154,10 @@ document.addEventListener('change',async e=>{
   const el=e.target;
   if(el.id==='restoreFile'&&el.files&&el.files[0]){try{const d=JSON.parse(await el.files[0].text());if(!d||d.app!=='clinic-records-local'||!d.tables)throw 0;
     view.restoreData=d;view.restoreInfo=(d.clinics||[]).join(', ')+' from '+fmtDate(String(d.exported||'').slice(0,10));view.confirm='restore';render();}catch(err){toast('That file is not a full backup from this app')}el.value='';return}
+  if(el.id==='xr-file'&&el.files&&el.files.length&&isAcct()){toast('Accountants can view X-rays but not add them.');el.value='';return}
   if(el.id==='xr-file'&&el.files&&el.files.length){view.xrKind=$('#xr-kind').value;await uploadXrays([...el.files]);return}
   if(el.id==='dayPick'&&el.value){view.day=el.value;render();refreshAppts();return}
+  if(el.dataset.roleuid){const {error}=await sb.rpc('set_member_role',{p_clinic:clinic.id,p_user:el.dataset.roleuid,p_role:el.value});if(error){toast(friendly(error));await loadTeam();render();return}await loadTeam();render();toast('Role changed');return}
   if(el.id==='switchClinic'){const m=memberships.find(x=>x.clinic_id===el.value);if(m)await openClinic(m);return}
   if(el.id==='importFile'&&el.files&&el.files[0]){try{const d=JSON.parse(await el.files[0].text());const list=Array.isArray(d)?d:(d.patients||[]);await importPatients(list);}catch(err){toast('That file is not a valid backup')}el.value='';return}
   if(el.dataset.f||el.dataset.mhf==='signed'||el.dataset.bpe!==undefined)render();

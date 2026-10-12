@@ -3,6 +3,11 @@
    It offers the same small set of calls the app used with Supabase, so the app works unchanged. */
 (function(){
 const DBN='clinic-records-local';
+/* Licensing: 14-day free trial per clinic, then read-only until a signed activation key is entered.
+   Keys are made in the seller's private Key Maker; this public key can only check them, not make them. */
+const LICENSE_PUBLIC_KEY={"kty":"EC","crv":"P-256","x":"6oT1-oIwFPO46SyzpmkPyQ_-_JAQPYNdoW8GbCkdnsA","y":"wnk5D2jCyZHtri9GETUavj9HL4hhV7pYIHULdxtKN1c"};
+const TRIAL_DAYS=14;
+const READONLY_MSG='Your free trial has ended, so the app is read-only. Activate it in Clinic & account → Activation.';
 const TABLES=['users','clinics','members','patients','appointments','xrays'];
 let idb=null,T={},session=null;const listeners=[];
 const enc=new TextEncoder();
@@ -26,10 +31,36 @@ const del=(s,k)=>tx(s,'readwrite',o=>o.delete(k));
 const keys=s=>tx(s,'readonly',o=>o.getAllKeys());
 const saveT=t=>put('tables',t,T[t]);
 
+const b64uBytes=s=>{s=String(s).replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u};
+let pubKey=null;const verified={};
+async function verifyKey(key){
+  key=String(key||'').replace(/\s+/g,'');
+  if(key in verified)return verified[key];
+  let out=null;
+  try{const m=key.match(/^CPR1-([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/);
+    if(m){pubKey=pubKey||await crypto.subtle.importKey('jwk',LICENSE_PUBLIC_KEY,{name:'ECDSA',namedCurve:'P-256'},false,['verify']);
+      const payload=b64uBytes(m[1]);
+      if(await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},pubKey,b64uBytes(m[2]),payload))out=JSON.parse(new TextDecoder().decode(payload));}}catch(e){out=null}
+  verified[key]=out;return out;
+}
+const clinicCode=c=>{const h=String(c.id).replace(/-/g,'').slice(0,10).toUpperCase();return h.slice(0,5)+'-'+h.slice(5)};
+function licenceOf(c){
+  if(c.license){const p=verified[String(c.license).replace(/\s+/g,'')];if(p&&p.c===clinicCode(c).replace('-',''))return{state:'active',name:p.n,date:p.d}}
+  const left=Math.ceil((new Date(c.created_at).getTime()+TRIAL_DAYS*864e5-Date.now())/864e5);
+  return left>0?{state:'trial',daysLeft:left}:{state:'expired'};
+}
+async function checkLicences(){for(const c of T.clinics)if(c.license)await verifyKey(c.license)}
+function canWrite(){
+  if(!session)return true;
+  const mine=T.members.filter(m=>m.user_id===session.user.id).map(m=>T.clinics.find(c=>c.id===m.clinic_id)).filter(Boolean);
+  return !mine.length||mine.some(c=>licenceOf(c).state!=='expired');
+}
+
 const ready=(async()=>{
   idb=await openDB();
   for(const t of TABLES)T[t]=(await get('tables',t))||[];
   session=(await get('meta','session'))||null;
+  await checkLicences();
   if(session&&!T.users.some(u=>u.id===session.user.id))session=null;
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
 })();
@@ -79,11 +110,12 @@ function query(table){
     if(!session)return{data:null,error:err('Please log in again.')};
     if(table==='users')return{data:null,error:err('Not allowed')};
     const uid=session.user.id,m=r=>filters.every(f=>f(r));
+    if(op!=='select'&&!canWrite())return{data:null,error:{message:READONLY_MSG,code:'readonly'}};
     try{
       if(op==='select'){
         let out=T[table].filter(m).map(r=>Object.assign({},r));
         if(table==='members'&&/clinics\(/.test(sel))out=out.map(r=>{const c=T.clinics.find(x=>x.id===r.clinic_id);r.clinics=c?Object.assign({},c):null;return r});
-        out=out.map(r=>{const c=table==='clinics'?r:r.clinics;if(c){c.has_recovery=!!c.recovery;delete c.recovery}return r});
+        out=out.map(r=>{const c=table==='clinics'?r:r.clinics;if(c){c.has_recovery=!!c.recovery;delete c.recovery;c.lic=licenceOf(c);c.clinic_code=clinicCode(c);delete c.license}return r});
         if(ord)out.sort((a,b)=>(a[ord.c]>b[ord.c]?1:a[ord.c]<b[ord.c]?-1:0)*(ord.asc?1:-1));
         if(rng)out=out.slice(rng[0],rng[1]+1);if(lim)out=out.slice(0,lim);
         if(single)return out[0]?{data:clone(out[0]),error:null}:{data:null,error:err('Not found')};
@@ -109,6 +141,7 @@ async function rpc(name,a){
   const uid=session.user.id;a=a||{};
   const isAdmin=c=>T.members.some(m=>m.clinic_id===c&&m.user_id===uid&&m.role==='admin');
   const needAdmin=c=>{if(!isAdmin(c))throw err('Only a clinic admin can do this')};
+  if(!['activate','admin_reset_password','new_recovery_code','rename_me'].includes(name)&&!canWrite())return{data:null,error:{message:READONLY_MSG,code:'readonly'}};
   try{switch(name){
     case 'create_clinic':{const nm=String(a.p_name||'').trim();if(!nm)throw err('Clinic name is required');const id=uuid();
       T.clinics.push({id,name:nm,address:String(a.p_address||'').trim(),phone:String(a.p_phone||'').trim(),invite_code:code(),reminder_template:'',created_by:uid,created_at:now()});
@@ -118,7 +151,7 @@ async function rpc(name,a){
       if(!T.members.some(m=>m.clinic_id===c.id&&m.user_id===uid)){T.members.push({clinic_id:c.id,user_id:uid,name:String(a.p_my_name||'').trim()||'Dentist',role:'dentist',joined_at:now()});await saveT('members')}
       return{data:c.id,error:null}}
     case 'new_invite_code':{needAdmin(a.p_clinic);const c=T.clinics.find(x=>x.id===a.p_clinic);c.invite_code=code();await saveT('clinics');return{data:c.invite_code,error:null}}
-    case 'set_member_role':{needAdmin(a.p_clinic);if(!['admin','dentist'].includes(a.p_role))throw err('Unknown role');
+    case 'set_member_role':{needAdmin(a.p_clinic);if(!['admin','dentist','accountant'].includes(a.p_role))throw err('Unknown role');
       const mem=T.members.find(m=>m.clinic_id===a.p_clinic&&m.user_id===a.p_user);if(!mem)throw err('Not in this clinic');
       if(a.p_role==='dentist'&&mem.role==='admin'&&T.members.filter(m=>m.clinic_id===a.p_clinic&&m.role==='admin').length<=1)throw err('A clinic needs at least one admin');
       mem.role=a.p_role;await saveT('members');return{data:null,error:null}}
@@ -126,7 +159,12 @@ async function rpc(name,a){
     case 'add_dentist':{needAdmin(a.p_clinic);const un=norm(a.p_username);if(!/^[a-z0-9._-]{3,}$/.test(un))throw err('Username: at least 3 letters or numbers, no spaces.');
       if(T.users.some(u=>u.username===un))throw err('That username is already taken.');if(String(a.p_password||'').length<8)throw err('Password must be at least 8 characters.');
       const u=await makeUser(un,a.p_password,{full_name:a.p_name});
-      T.members.push({clinic_id:a.p_clinic,user_id:u.id,name:String(a.p_name||'').trim()||un,role:a.p_role==='admin'?'admin':'dentist',joined_at:now()});await saveT('members');return{data:u.id,error:null}}
+      T.members.push({clinic_id:a.p_clinic,user_id:u.id,name:String(a.p_name||'').trim()||un,role:['admin','accountant'].includes(a.p_role)?a.p_role:'dentist',joined_at:now()});await saveT('members');return{data:u.id,error:null}}
+    case 'activate':{needAdmin(a.p_clinic);const c=T.clinics.find(x=>x.id===a.p_clinic);
+      const key=String(a.p_key||'').replace(/\s+/g,'');const p=await verifyKey(key);
+      if(!p)throw err('This activation key is not valid. Copy the whole key exactly as you received it.');
+      if(p.c!==clinicCode(c).replace('-',''))throw err('This key was made for a different clinic code. Your clinic code is '+clinicCode(c)+'.');
+      c.license=key;await saveT('clinics');return{data:{name:p.n,date:p.d},error:null}}
     case 'new_recovery_code':{needAdmin(a.p_clinic);const c=T.clinics.find(x=>x.id===a.p_clinic);
       const raw=code()+code().slice(0,2);const pretty=raw.slice(0,4)+'-'+raw.slice(4,8)+'-'+raw.slice(8,12);
       const salt=hex(crypto.getRandomValues(new Uint8Array(16)));c.recovery={salt,hash:await hash(raw,salt)};await saveT('clinics');return{data:pretty,error:null}}
@@ -188,6 +226,7 @@ async function importAll(obj){
   await tx('files','readwrite',o=>o.clear());
   for(const f of obj.files||[])await put('files',f.path,{type:f.type,buf:unb64(f.data)});
   for(const t of TABLES){T[t]=Array.isArray(obj.tables[t])?obj.tables[t]:[];await saveT(t)}
+  await checkLicences();
   await setSession(null);
 }
 
