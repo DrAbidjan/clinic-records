@@ -155,6 +155,13 @@ const dirty=new Set();let flushT=null,syncState='saved';
 function setSync(s){syncState=s;const el=$('#sync');if(el){el.className='sync '+s;el.textContent=syncText()}}
 function syncText(){if(readOnly())return 'Read-only';return {saved:LOCAL?'Saved on this device':'All changes saved',saving:'Saving…',error:LOCAL?'Not saved':'Not saved – check internet'}[syncState]}
 function syncBadge(){return `<span id="sync" class="sync ${syncState}" role="status">${syncText()}</span>`}
+let dailyBlob=null,dailyBusy=false,snapList=null;
+const backedUpToday=()=>{const l=+lsGet('lastFullBackup')||0;return l&&dayOf(l)===today()};
+async function prepareDaily(){
+  if(!LOCAL||dailyBusy||dailyBlob||backedUpToday()||!db.patients.length)return;
+  dailyBusy=true;try{const data=await window.__LOCAL_DB.exportAll();dailyBlob=new Blob([JSON.stringify(data)],{type:'application/json'});softRender()}catch(e){}dailyBusy=false;
+}
+if(window.__LOCAL_DB)setInterval(()=>{window.__LOCAL_DB.autoSnapshot().catch(()=>{});if(clinic)prepareDaily()},60*60*1000);
 const readOnly=()=>LOCAL&&clinic&&clinic.lic&&clinic.lic.state==='expired';
 let roToastAt=0;
 function markDirty(id){if(!id)return;
@@ -245,6 +252,7 @@ async function openClinic(m){
   try{db={patients:[]};await Promise.all([loadPatients(),loadTeam()]);}
   catch(e){view.screen='error';view.msg={t:'err',m:friendly(e)};render();return}
   subscribe();
+  if(LOCAL)setTimeout(prepareDaily,1500);
   view={screen:'list',pid:null,tab:'details',tooth:null,q:'',confirm:null,msg:null,authTab:'login'};render();
 }
 async function refreshClinic(){const {data}=await sb.from('clinics').select('id,name,address,phone,invite_code,reminder_template').eq('id',clinic.id).single();if(data){clinic=data;const m=memberships.find(x=>x.clinic_id===clinic.id);if(m)m.clinics=clinic;}}
@@ -680,7 +688,9 @@ function settingsView(){
   ${LOCAL&&admin?`<section class="panel">
     <h3>Delete clinic</h3>
     <p class="small" style="margin:0">Deletes the clinic, all patients, X-rays, appointments and logins from this device for good. Save a full backup first if you may need the records later. A new clinic gets a new clinic code, so an old activation key won't work for it.</p>
-    ${view.confirm==='wipe'?`<label class="f"><span>Type the clinic name to confirm: <b>${esc(clinic.name)}</b></span><input type="text" id="wipe-name" autocomplete="off"></label>
+    ${view.confirm==='wipe'?`<p class="small" style="margin:0">To protect patient records, deleting needs a <b>deletion code</b> from the seller. Send your clinic code <b>${esc(clinic.clinic_code||'')}</b> to ask for one. A code works for about 2 days.</p>
+      ${SELLER.whatsapp?`<div class="row"><a class="btn wa" href="https://wa.me/${String(SELLER.whatsapp).replace(/\D/g,'').replace(/^0/,'92')}?text=${encodeURIComponent('Assalam-o-Alaikum, I want to delete my clinic in Clinic Patient Records.\nClinic name: '+clinic.name+'\nClinic code: '+(clinic.clinic_code||''))}" target="_blank" rel="noopener">Request code on WhatsApp</a></div>`:''}
+      <label class="f"><span>Deletion code</span><textarea id="wipe-code" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste the deletion code (starts with CPR1-)"></textarea></label>
       <div class="row"><button class="btn" data-act="cancelConfirm">Cancel</button><button class="btn danger" data-act="wipe">Delete everything</button></div>`
     :`<div class="row"><button class="btn danger" data-act="askWipe">Delete clinic and all records</button></div>`}
   </section>`:''}
@@ -711,7 +721,8 @@ function deviceBanner(){
   if(lic.state==='expired')h+=`<div class="msg err">Your free trial has ended. You can still view records and save backups, but not add or change anything. <button class="linkbtn" data-act="goActivate">Activate the app</button></div>`;
   else if(lic.state==='trial'&&lic.daysLeft<=5)h+=`<div class="msg warn">Free trial: ${lic.daysLeft} day${lic.daysLeft>1?'s':''} left. <button class="linkbtn" data-act="goActivate">Activate the app</button></div>`;
   if(isAdmin()&&!clinic.has_recovery)h+=`<div class="msg warn">Set up an admin recovery code, so a forgotten admin password can be reset. <button class="linkbtn" data-act="settings">Set it up</button></div>`;
-  if(old&&db.patients.length)h+=`<div class="msg warn">${last?'Your last full backup was more than a week ago.':'You have no backup yet.'} Records are only on this device. <button class="linkbtn" data-act="settings">Save a backup</button></div>`;
+  if(dailyBlob&&!backedUpToday())h+=`<div class="msg ${old?'warn':'ok'}"><div class="row" style="justify-content:space-between"><span>${old?(last?'No backup file for over a week. ':'No backup file yet. '):''}Today's backup is ready (${dailyBlob.size>=1e6?(dailyBlob.size/1e6).toFixed(1)+' MB':Math.max(1,Math.round(dailyBlob.size/1e3))+' KB'}).</span><button class="btn small primary" data-act="saveDaily">Save to Files</button></div></div>`;
+  else if(old&&db.patients.length)h+=`<div class="msg warn">${last?'Your last full backup was more than a week ago.':'You have no backup yet.'} Records are only on this device. <button class="linkbtn" data-act="settings">Save a backup</button></div>`;
   return h;
 }
 function activationPanel(admin){
@@ -765,6 +776,11 @@ function localBackupHtml(admin){
     <p class="small" style="margin:0">All records and X-rays are stored only on this device. If the phone is lost, broken or reset, they are gone. Save a full backup every week and keep it in iCloud Drive or Google Drive. The same file moves everything to a new phone.</p>
     <p class="small muted" style="margin:0">Last full backup: ${last?fmtDate(dayOf(last))+(days?' ('+days+' day'+(days>1?'s':'')+' ago)':' (today)'):'never'}</p>
     <div class="row">${view.backupBlob?`<button class="btn primary" data-act="shareBackup">Save backup file now</button><span class="small muted">${(view.backupBlob.size/1e6).toFixed(1)} MB ready</span>`:`<button class="btn primary" data-act="fullBackup" ${view.backupBusy?'disabled':''}>${view.backupBusy?'Preparing backup…':'Save full backup (with X-rays)'}</button>`}</div>
+    <h3 style="margin-top:6px">Automatic daily copies on this device</h3>
+    <p class="small muted" style="margin:0">The app keeps a copy of all records from each of the last 7 days, by itself. Use it to undo a mistake. These copies are lost with the phone, so still save the backup file each day.</p>
+    ${snapList===null?'<p class="small muted" style="margin:0">Loading…</p>':snapList.length?`<div class="plist">${snapList.map(sn=>`<div class="member"><span style="flex:1;min-width:0"><b>${fmtDate(sn.date)}</b><br><span class="small muted">${sn.patients} patient${sn.patients===1?'':'s'} · saved ${fmtTime(sn.at)}</span></span>
+      ${admin?(view.confirm==='snap:'+sn.date?`<button class="btn small" data-act="cancelConfirm">Cancel</button><button class="btn small danger" data-snaprestore="${sn.date}">Yes, go back</button>`:`<button class="btn small" data-asksnap="${sn.date}">Restore</button>`):''}</div>`).join('')}</div>`:'<p class="small muted" style="margin:0">The first copy is made tomorrow.</p>'}
+    ${admin&&String(view.confirm||'').startsWith('snap:')?'<p class="small" style="margin:0;color:var(--alert)">Going back replaces all current records with that day\'s copy. Anything added since is lost. Everyone is logged out.</p>':''}
     ${admin?`<label class="f"><span>Restore a full backup (replaces everything on this device)</span><input type="file" id="restoreFile" accept=".json,application/json"></label>`:''}
     ${view.confirm==='restore'?`<div class="confirm">Replace ALL records on this device with the backup of ${esc(view.restoreInfo||'')}? Everyone is logged out afterwards.<span class="spacer"></span><button class="btn small" data-act="cancelConfirm">Cancel</button><button class="btn small danger" data-act="doRestore">Replace</button></div>`:''}
   </section>`;
@@ -1056,6 +1072,8 @@ document.addEventListener('click',async e=>{
   if(d.ast){const {error}=await sb.from('appointments').update({status:d.ast}).eq('id',d.aid);if(error){toast(friendly(error));return}[apptsDay,apptsPatient].forEach(l=>{const x=l.find(y=>y.id===d.aid);if(x)x.status=d.ast});render();return}
   if(d.xr){xrView=d.xr;view.xrf={b:100,c:100,inv:false,zoom:false};view.confirm=null;view.xrBlob=null;render();
     const x0=xrays.find(y=>y.id===d.xr);if(x0)sb.storage.from('xrays').download(x0.path).then(r=>{if(xrView===d.xr&&r.data)view.xrBlob=r.data});return}
+  if(d.asksnap){view.confirm='snap:'+d.asksnap;render();return}
+  if(d.snaprestore){try{await window.__LOCAL_DB.restoreSnapshot(d.snaprestore);toast('Records restored to '+fmtDate(d.snaprestore));setTimeout(()=>location.reload(),700)}catch(err){toast(friendly(err))}return}
   if(d.askpw){view.confirm='pw:'+d.askpw;render();const i=$('#rp-pw');if(i)i.focus();return}
   if(d.askadel){view.confirm='adel:'+d.askadel;render();return}
   if(d.adel){const {error}=await sb.from('appointments').delete().eq('id',d.adel);if(error){toast(friendly(error));return}apptsDay=apptsDay.filter(a=>a.id!==d.adel);apptsPatient=apptsPatient.filter(a=>a.id!==d.adel);view.confirm=null;render();toast('Appointment deleted');return}
@@ -1085,11 +1103,12 @@ document.addEventListener('click',async e=>{
     case 'goActivate':view.screen='settings';view.newRecovery=null;view.confirm=null;view.msg=null;render();setTimeout(()=>{const a=$('#activation');if(a)a.scrollIntoView({block:'start'})},50);break;
     case 'copyClinicCode':{const c=clinic.clinic_code;const sel=()=>{const r=document.createRange();r.selectNodeContents($('#ccode'));const s=getSelection();s.removeAllRanges();s.addRange(r);toast('Code selected – copy it')};
       try{navigator.clipboard.writeText(c).then(()=>toast('Clinic code copied'),sel)}catch(err){sel()}break;}
-    case 'askWipe':view.confirm='wipe';render();const wn=$('#wipe-name');if(wn)wn.focus();break;
-    case 'wipe':{if(!isAdmin())break;const typed=($('#wipe-name').value||'').trim().toLowerCase();
-      if(typed!==String(clinic.name).trim().toLowerCase()){toast('The name does not match. Nothing was deleted.');break;}
+    case 'askWipe':view.confirm='wipe';render();break;
+    case 'wipe':{if(!isAdmin())break;const problem=await window.__LOCAL_DB.checkDeleteCode(clinic.id,$('#wipe-code').value);
+      if(problem){toast(problem+' Nothing was deleted.');break;}
       await window.__LOCAL_DB.wipeAll();try{localStorage.removeItem('lastFullBackup');localStorage.removeItem('clinicId')}catch(e){}
       toast('Clinic deleted');setTimeout(()=>location.reload(),700);break;}
+    case 'saveDaily':{const bl=dailyBlob;if(!bl)break;deliverFile(bl,('Backup_'+clinic.name+'_'+today()+'.json').replace(/[^\w.\-]+/g,'_'),'save').then(ok=>{if(ok){lsSet('lastFullBackup',String(Date.now()));dailyBlob=null;toast('Backup saved');render()}},()=>toast('Could not save the backup'));break;}
     case 'showUsers':view.email=$('#li-email')?$('#li-email').value:'';view.showUsers=!view.showUsers;render();break;
     case 'fullBackup':{view.backupBusy=true;render();try{const data=await window.__LOCAL_DB.exportAll();view.backupBlob=new Blob([JSON.stringify(data)],{type:'application/json'});}catch(err){toast('Could not prepare the backup')}view.backupBusy=false;render();break;}
     case 'shareBackup':{const bl=view.backupBlob;if(!bl)break;deliverFile(bl,('Full_Backup_'+clinic.name+'_'+today()+'.json').replace(/[^\w.\-]+/g,'_'),'save').then(ok=>{if(ok){lsSet('lastFullBackup',String(Date.now()));view.backupBlob=null;toast('Backup saved – keep it in iCloud Drive or Google Drive');render()}},()=>toast('Could not save the backup'));break;}
@@ -1111,7 +1130,7 @@ document.addEventListener('click',async e=>{
       view.msg=error?{t:'err',m:friendly(error)}:{t:'ok',m:'If that email has an account, a reset link is on its way. Open it on this device.'};render();break;}
     case 'back':if(view.screen==='patient'&&view.backTo==='appts'){view=Object.assign(view,{screen:'appts',pid:null,confirm:null});render();refreshAppts();break;}
       view=Object.assign(view,{screen:memberships.length?'list':'onboard',pid:null,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();break;
-    case 'settings':view.newRecovery=null;view.screen='settings';view.confirm=null;view.msg=null;render();loadTeam().then(()=>{if(view.screen==='settings')softRender()});break;
+    case 'settings':view.newRecovery=null;if(LOCAL){snapList=null;window.__LOCAL_DB.listSnapshots().then(l=>{snapList=l;if(view.screen==='settings')softRender()})}view.screen='settings';view.confirm=null;view.msg=null;render();loadTeam().then(()=>{if(view.screen==='settings')softRender()});break;
     case 'onboard':view.screen='onboard';view.msg=null;render();break;
     case 'newPatient':{const np=blankPatient();db.patients.push(np);markDirty(np.id);view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
     case 'example':{const np=sample();np.notes[0].by=me.name;db.patients.push(np);markDirty(np.id);render();toast('Example patient added');break;}

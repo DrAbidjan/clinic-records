@@ -45,7 +45,7 @@ async function verifyKey(key){
 }
 const clinicCode=c=>{const h=String(c.id).replace(/-/g,'').slice(0,10).toUpperCase();return h.slice(0,5)+'-'+h.slice(5)};
 function licenceOf(c){
-  if(c.license){const p=verified[String(c.license).replace(/\s+/g,'')];if(p&&p.c===clinicCode(c).replace('-',''))return{state:'active',name:p.n,date:p.d}}
+  if(c.license){const p=verified[String(c.license).replace(/\s+/g,'')];if(p&&p.t!=='del'&&p.c===clinicCode(c).replace('-',''))return{state:'active',name:p.n,date:p.d}}
   const left=Math.ceil((new Date(c.created_at).getTime()+TRIAL_DAYS*864e5-Date.now())/864e5);
   return left>0?{state:'trial',daysLeft:left}:{state:'expired'};
 }
@@ -162,7 +162,7 @@ async function rpc(name,a){
       T.members.push({clinic_id:a.p_clinic,user_id:u.id,name:String(a.p_name||'').trim()||un,role:['admin','accountant'].includes(a.p_role)?a.p_role:'dentist',joined_at:now()});await saveT('members');return{data:u.id,error:null}}
     case 'activate':{needAdmin(a.p_clinic);const c=T.clinics.find(x=>x.id===a.p_clinic);
       const key=String(a.p_key||'').replace(/\s+/g,'');const p=await verifyKey(key);
-      if(!p)throw err('This activation key is not valid. Copy the whole key exactly as you received it.');
+      if(!p||p.t==='del')throw err('This activation key is not valid. Copy the whole key exactly as you received it.');
       if(p.c!==clinicCode(c).replace('-',''))throw err('This key was made for a different clinic code. Your clinic code is '+clinicCode(c)+'.');
       c.license=key;await saveT('clinics');return{data:{name:p.n,date:p.d},error:null}}
     case 'new_recovery_code':{needAdmin(a.p_clinic);const c=T.clinics.find(x=>x.id===a.p_clinic);
@@ -230,11 +230,39 @@ async function importAll(obj){
   await setSession(null);
 }
 
+/* Automatic daily copies inside the device (records only; X-ray image files are kept once). Last 7 days. */
+const SNAP_KEEP=7;
+const localDay=()=>{const n=new Date(),p=x=>String(x).padStart(2,'0');return n.getFullYear()+'-'+p(n.getMonth()+1)+'-'+p(n.getDate())};
+async function autoSnapshot(){
+  await ready;if(!T.clinics.length)return false;
+  const key='snap:'+localDay();const ks=(await keys('meta')).map(String);if(ks.includes(key))return false;
+  await put('meta',key,{date:localDay(),at:now(),tables:clone(T)});
+  const all=ks.filter(k=>k.startsWith('snap:')).concat(key).sort();
+  while(all.length>SNAP_KEEP)await del('meta',all.shift());
+  return true;
+}
+async function listSnapshots(){await ready;const out=[];for(const k of (await keys('meta')).map(String).filter(k=>k.startsWith('snap:')).sort().reverse()){const s=await get('meta',k);out.push({date:s.date,at:s.at,patients:(s.tables.patients||[]).length})}return out}
+async function restoreSnapshot(date){
+  await ready;const s=await get('meta','snap:'+date);if(!s)throw err('That copy was not found.');
+  for(const t of TABLES){T[t]=Array.isArray(s.tables[t])?clone(s.tables[t]):[];await saveT(t)}
+  await checkLicences();await setSession(null);
+}
 async function wipeAll(){
   await ready;for(const st of ['tables','files','meta'])await tx(st,'readwrite',o=>o.clear());
   for(const t of TABLES)T[t]=[];session=null;
 }
-window.__LOCAL_DB={ready,wipeAll,userCount:()=>T.users.length,recover,usernames:()=>T.users.map(u=>{const m=T.members.find(x=>x.user_id===u.id);return{username:u.username,name:(m&&m.name)||(u.meta&&u.meta.full_name)||''}}),exportAll,importAll};
+async function checkDeleteCode(clinicId,key){
+  await ready;const c=T.clinics.find(x=>x.id===clinicId);if(!c)return 'Clinic not found.';
+  const p=await verifyKey(key);
+  if(!p||p.t!=='del')return 'This deletion code is not valid. Copy the whole code exactly as you received it.';
+  if(p.c!==clinicCode(c).replace('-',''))return 'This deletion code was made for a different clinic code. Your clinic code is '+clinicCode(c)+'.';
+  const day=d=>{const x=new Date(d+'T12:00:00');return Math.round(x.getTime()/864e5)};const pad=n=>String(n).padStart(2,'0');const n=new Date();
+  const today=day(n.getFullYear()+'-'+pad(n.getMonth()+1)+'-'+pad(n.getDate()));
+  if(Math.abs(today-day(p.d))>1)return 'This deletion code has expired. Ask for a new one.';
+  return null;
+}
+ready.then(()=>autoSnapshot()).catch(()=>{});
+window.__LOCAL_DB={ready,wipeAll,autoSnapshot,listSnapshots,restoreSnapshot,checkDeleteCode,userCount:()=>T.users.length,recover,usernames:()=>T.users.map(u=>{const m=T.members.find(x=>x.user_id===u.id);return{username:u.username,name:(m&&m.name)||(u.meta&&u.meta.full_name)||''}}),exportAll,importAll};
 window.supabase={createClient(){return{
   auth,from:query,rpc,storage,
   channel(){const c={on(){return c},subscribe(){return c}};return c},removeChannel(){}
