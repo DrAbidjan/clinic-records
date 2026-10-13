@@ -8,7 +8,7 @@ const DBN='clinic-records-local';
 const LICENSE_PUBLIC_KEY={"kty":"EC","crv":"P-256","x":"6oT1-oIwFPO46SyzpmkPyQ_-_JAQPYNdoW8GbCkdnsA","y":"wnk5D2jCyZHtri9GETUavj9HL4hhV7pYIHULdxtKN1c"};
 const TRIAL_DAYS=14;
 const READONLY_MSG='Your free trial has ended, so the app is read-only. Activate it in Clinic & account → Activation.';
-const TABLES=['users','clinics','members','patients','appointments','xrays'];
+const TABLES=['users','clinics','members','patients','appointments','xrays','attendance','messages'];
 let idb=null,T={},session=null;const listeners=[];
 const enc=new TextEncoder();
 const now=()=>new Date().toISOString();
@@ -110,7 +110,7 @@ function query(table){
     if(!session)return{data:null,error:err('Please log in again.')};
     if(table==='users')return{data:null,error:err('Not allowed')};
     const uid=session.user.id,m=r=>filters.every(f=>f(r));
-    if(op!=='select'&&!canWrite())return{data:null,error:{message:READONLY_MSG,code:'readonly'}};
+    if(op!=='select'&&table!=='attendance'&&!canWrite())return{data:null,error:{message:READONLY_MSG,code:'readonly'}};
     try{
       if(op==='select'){
         let out=T[table].filter(m).map(r=>Object.assign({},r));
@@ -262,7 +262,7 @@ async function checkDeleteCode(clinicId,key){
   return null;
 }
 ready.then(()=>autoSnapshot()).catch(()=>{});
-window.__LOCAL_DB={ready,wipeAll,autoSnapshot,listSnapshots,restoreSnapshot,checkDeleteCode,userCount:()=>T.users.length,recover,usernames:()=>T.users.map(u=>{const m=T.members.find(x=>x.user_id===u.id);return{username:u.username,name:(m&&m.name)||(u.meta&&u.meta.full_name)||''}}),exportAll,importAll};
+window.__LOCAL_DB={ready,metaGet:async k=>{await ready;return get('meta','dev:'+k)},metaSet:async(k,v)=>{await ready;return put('meta','dev:'+k,v)},wipeAll,autoSnapshot,listSnapshots,restoreSnapshot,checkDeleteCode,userCount:()=>T.users.length,recover,usernames:()=>T.users.map(u=>{const m=T.members.find(x=>x.user_id===u.id);return{username:u.username,name:(m&&m.name)||(u.meta&&u.meta.full_name)||''}}),exportAll,importAll};
 window.supabase={createClient(){return{
   auth,from:query,rpc,storage,
   channel(){const c={on(){return c},subscribe(){return c}};return c},removeChannel(){}
