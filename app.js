@@ -5,7 +5,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
-const APP_VERSION='13 Oct 2026 · real teeth';
+const APP_VERSION='13 Oct 2026 · compact chart';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -1553,11 +1553,10 @@ function toothXrays(n){return xrays.filter(x=>new RegExp('(^|\\D)'+n+'(\\D|$)').
 function toothXrayHtml(t){
   const list=toothXrays(t);
   return `<div class="txr">
-    <div class="row"><h3>X-rays and photos of tooth ${t}</h3><span class="spacer"></span><span class="small muted">${list.length?list.length+' found':''}</span></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><h3>X-rays of tooth ${t}</h3><span class="small muted">${list.length?list.length+' found':(xrLoading?'Loading…':'none yet')}</span><span class="spacer"></span>${isAcct()?'':`<select id="tx-kind" style="width:auto" aria-label="Type of image">${['Periapical (PA)','Bitewing (BW)','Intraoral camera photo','Microscope photo','OPG','CBCT / scan report','Old record (scan)','Other'].map(k=>`<option ${k===(view.txKind||'Periapical (PA)')?'selected':''}>${k}</option>`).join('')}</select>
+      <label class="btn filebtn ${xrBusy?'busy':''}">${xrBusy?'Saving…':'+ Add X-ray for tooth '+t}<input type="file" id="tx-file" accept="image/*,application/pdf" multiple ${xrBusy||readOnly()?'disabled':''}></label>`}</div>
     ${list.length?`<div class="txr-strip">${list.map(x=>`<button class="txr-item" data-xr="${x.id}" aria-label="Open ${esc(x.kind)} from ${fmtDate(x.taken_on)}">${x.mime==='application/pdf'?'<span class="xthumb pdf">PDF</span>':`<span class="xthumb">${xrUrls[x.path]?`<img src="${esc(xrUrls[x.path])}" alt="">`:''}</span>`}<span class="txr-cap"><b>${esc(x.kind)}</b>${fmtDate(x.taken_on)}${x.teeth?' · '+esc(x.teeth):''}</span></button>`).join('')}</div>`
-      :`<p class="small muted" style="margin:0">${xrLoading?'Loading…':'No X-ray saved for this tooth yet.'}</p>`}
-    ${isAcct()?'':`<div class="row"><select id="tx-kind" style="width:auto" aria-label="Type of image">${['Periapical (PA)','Bitewing (BW)','Intraoral camera photo','Microscope photo','OPG','CBCT / scan report','Old record (scan)','Other'].map(k=>`<option ${k===(view.txKind||'Periapical (PA)')?'selected':''}>${k}</option>`).join('')}</select>
-      <label class="btn filebtn ${xrBusy?'busy':''}">${xrBusy?'Saving…':'+ Add X-ray for tooth '+t}<input type="file" id="tx-file" accept="image/*,application/pdf" multiple ${xrBusy||readOnly()?'disabled':''}></label></div>`}
+      :''}
   </div>`;
 }
 function prosText(p,n){const st=p.chart[n];const m=(p.pros||{})[n];return PROS_ST.includes(st)&&m&&PM[m]?' – '+PM[m]:''}
@@ -1583,10 +1582,10 @@ function editor(p,t,mode,mat,sum){
         ${mode==='fill'||mode==='sec'?`<h3>2 · ${mode==='sec'?'Existing filling':'Material'}</h3>
         <div class="chips">${MATS.map(m=>`<button class="chip ${mat===m.k?'on':''}" data-mat="${m.k}"><i style="background:var(${m.col})"></i>${m.label}</button>`).join('')}</div>`:''}
         <div class="summary">${sum.length?sum.map(x=>`<span><b>${t} ${x.s}</b> · ${x.txt}</span>`).join(''):'<span class="muted">No surfaces charted yet</span>'}</div>
+        <h3 style="margin-top:4px">Whole tooth</h3>
+        <div class="statusgrid">${STATUS.map(s=>`<button class="${cur===s.k?'on':''}" data-setst="${s.k}"><i style="width:12px;height:12px;border-radius:3px;flex:none;background:${s.col?`var(${s.col})`:'var(--paper)'};border:1px solid var(--line)"></i>${s.label}${s.de?`<b>${s.de}</b>`:''}</button>`).join('')}</div>
       </div>
     </div>
-    <h3>Whole tooth</h3>
-    <div class="statusgrid">${STATUS.map(s=>`<button class="${cur===s.k?'on':''}" data-setst="${s.k}"><i style="width:12px;height:12px;border-radius:3px;flex:none;background:${s.col?`var(${s.col})`:'var(--paper)'};border:1px solid var(--line)"></i>${s.label}${s.de?`<b>${s.de}</b>`:''}</button>`).join('')}</div>
     ${PROS_ST.includes(cur)?`<div class="impbox"><h3>${cur==='implant'?'Implant crown material':cur==='veneer'?'Veneer material':(cur==='crown'?'Crown':'Bridge')+' material'}</h3>
       <div class="chips">${PROS_MATS.filter(([k])=>cur!=='veneer'||['CER','EMX','ZR','TMP'].includes(k)).map(([k,l])=>`<button class="chip ${(p.pros[t]||'')===k?'on':''}" data-pros="${k}">${l}</button>`).join('')}</div>
       ${cur==='abut'||cur==='bridge'?'<p class="small muted" style="margin:0">Mark the support teeth as <b>Bridge abutment</b> and the replaced teeth as <b>Bridge pontic</b>. They are joined on the chart.</p>':''}</div>`:''}
@@ -1598,8 +1597,8 @@ function editor(p,t,mode,mat,sum){
     <div class="row" style="gap:18px">
       <label class="row small" style="gap:10px"><input type="checkbox" id="rct" data-rct="${t}" ${p.rct[t]?'checked':''} style="width:22px;height:22px"> Root canal treated (RCT)</label>
       <label class="row small" style="gap:8px">Mobility <select id="mob" data-mob="${t}" style="width:auto">${MOB.map(o=>`<option value="${o}" ${(p.mob[t]||'')===o?'selected':''}>${o?'Grade '+o:'None'}</option>`).join('')}</select></label>
+      <label class="f" style="flex:1;min-width:200px;flex-direction:row;align-items:center;gap:8px"><span style="white-space:nowrap">Note</span><input type="text" id="toothnote" data-tnote="${t}" value="${esc(p.toothNotes[t])}" placeholder="e.g. deep caries, TTP +, pericoronitis" aria-label="Note for tooth ${t}"></label>
     </div>
-    <label class="f"><span>Note for tooth ${t}</span><input type="text" id="toothnote" data-tnote="${t}" value="${esc(p.toothNotes[t])}" placeholder="e.g. deep caries, TTP +, pericoronitis"></label>
     ${toothXrayHtml(t)}
     <div class="row"><button class="btn" data-act="addToPlan">+ Add treatment for ${t}</button><span class="spacer"></span>${view.confirm==='clearTooth'?`<button class="btn small" data-act="cancelConfirm">Keep</button><button class="btn small danger" data-act="clearTooth">Yes, clear ${t}</button>`:`<button class="btn small danger" data-act="askClearTooth">Clear tooth</button>`}</div>
   </div>`;
@@ -1627,7 +1626,7 @@ function chartTab(p){
       <span class="side" style="${sideL}">Lower right · Q${dent==='prim'?8:4}</span><span></span><span class="side r" style="${sideR}">Lower left · Q${dent==='prim'?7:3}</span>
     </div></div>
     <p class="small muted" style="margin:0">Charted like an OPG: patient's right on your left. On a phone, swipe the chart sideways.</p>
-    <div class="legend">${legend.map(([l,s])=>`<span>${s?`<i style="${s}"></i>`:''}${l}</span>`).join('')}</div>
+    <details class="legendbox"><summary>Colour key – what the signs mean</summary><div class="legend">${legend.map(([l,s])=>`<span>${s?`<i style="${s}"></i>`:''}${l}</span>`).join('')}</div></details>
     ${t?editor(p,t,mode,mat,sum):''}
   </section>
   <section class="panel">

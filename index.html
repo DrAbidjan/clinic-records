@@ -396,14 +396,43 @@ table.att td.num{font-variant-numeric:tabular-nums}
   .appts-layout{display:grid;grid-template-columns:340px minmax(0,1fr);align-items:start;gap:18px}
   .cal{position:sticky;top:20px}
 }
+
+/* compact tooth editor so the chart stays in view */
+#editor{padding:12px 14px}
+#editor h2{font-size:1.05rem;margin:0}
+#editor h3{font-size:.72rem;margin:0;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+#editor .chips{gap:4px}
+#editor .chip{padding:2px 9px;min-height:27px;font-size:.76rem;gap:5px}
+#editor .chip i{width:9px;height:9px;border-radius:2px}
+#editor .sedit{grid-template-columns:minmax(0,132px) 1fr;gap:12px}
+#editor .sedit>div:last-child{gap:6px!important}
+#editor .big p{font-size:.68rem;margin-top:2px!important}
+#editor .sidebig{max-width:132px}
+#editor .summary{font-size:.76rem;padding:4px 8px;gap:1px}
+#editor .statusgrid{grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:4px}
+#editor .statusgrid button{padding:3px 7px;min-height:28px;font-size:.74rem;gap:5px;line-height:1.1;border-radius:7px}
+#editor .statusgrid button i{width:9px!important;height:9px!important}
+#editor .statusgrid b{font-size:.62rem}
+#editor .impbox{padding:7px 10px;gap:5px}
+#editor .impbox .small{font-size:.7rem}
+#editor select{min-height:30px;padding:3px 8px;font-size:.8rem}
+#editor .f span{font-size:.72rem}
+#editor input[type=checkbox]{width:17px!important;height:17px!important}
+#editor textarea,#editor input[type=text]{min-height:32px;padding:5px 9px;font-size:.82rem}
+#editor .btn{min-height:32px;padding:4px 12px;font-size:.82rem}
+#editor .txr{padding:7px 10px;gap:5px}
+#editor .txr h3{white-space:nowrap}
+@media (max-width:640px){#editor .sedit{grid-template-columns:1fr}#editor .sedit>.big{max-width:132px;margin:0 auto}}
+.legendbox summary{cursor:pointer;font-size:.8rem;color:var(--muted);padding:2px 0;list-style-position:inside}
+.legendbox[open] summary{margin-bottom:6px}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div class="toast" id="toast" hidden></div>
-<script src="local-db.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="app.js"></script>
-<script>if('serviceWorker' in navigator&&location.protocol==='https:'||location.hostname==='localhost'){navigator.serviceWorker&&navigator.serviceWorker.register('sw.js').catch(()=>{})}</script>
 </body>
 </html>
