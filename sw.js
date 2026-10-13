@@ -1,8 +1,8 @@
 /* Clinic Patient Records – offline support.
    Keeps a copy of the app on this device so it opens without internet.
-   App files: fetched fresh when online (so updates arrive), saved copy used when offline.
+   App files: always fetched fresh when online (so updates arrive), saved copy used when offline.
    Libraries and fonts: saved copy used first. */
-const CACHE='clinic-records-v1';
+const CACHE='clinic-records-v2';
 const APP=['./','index.html','app.js','local-db.js'];
 const LIBS=['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js','https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'];
 self.addEventListener('install',e=>{
@@ -19,7 +19,7 @@ self.addEventListener('fetch',e=>{
   const url=new URL(req.url);
   const same=url.origin===self.location.origin;
   if(same){
-    e.respondWith(fetch(req).then(res=>{if(res.ok){const copy=res.clone();caches.open(CACHE).then(c=>c.put(req,copy))}return res})
+    e.respondWith(fetch(req,{cache:'no-cache'}).then(res=>{if(res.ok){const copy=res.clone();caches.open(CACHE).then(c=>c.put(req,copy))}return res})
       .catch(()=>caches.match(req,{ignoreSearch:true}).then(r=>r||caches.match('index.html'))));
     return;
   }

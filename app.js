@@ -5,6 +5,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
+const APP_VERSION='13 Oct 2026 · real teeth';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -1040,6 +1041,7 @@ function shell(content){
       <div class="side-user"><span class="avatar" style="--h:${hueOf(me.name)}">${esc(ini)}</span><span><b>${esc(me.name)}</b><small>${ROLE_LABEL[me.role]||''}${loginAt?' · since '+hm(loginAt):''}</small></span></div>
       ${syncBadge()}
       <p class="side-credit">Made and designed by Dr Abid Ali, Forensic Odontologist</p>
+      <p class="side-credit" style="opacity:.75">Version: ${APP_VERSION}</p>
       <div class="row"><button class="side-btn" data-act="toggleSound" aria-pressed="${Sound.on}">${icon(Sound.on?'sound':'mute')}<span>Sound ${Sound.on?'on':'off'}</span></button><button class="side-btn" data-act="logout">${icon('logout')}<span>Log out</span></button></div>
     </div>
   </aside>
@@ -1199,6 +1201,7 @@ function settingsView(){
   return `
   <header class="top desk-hide"><button class="btn small" data-act="back">← Patients</button>${syncBadge()}</header>
   <h1>Clinic & account</h1>
+  <p class="small muted" style="margin:-6px 0 12px">App version: <b>${APP_VERSION}</b></p>
   <section class="panel desk-hide"><div class="row"><span>Sounds</span><span class="spacer"></span><button class="btn small" data-act="toggleSound">${Sound.on?'Sound on – turn off':'Sound off – turn on'}</button></div></section>
   ${msgHtml()}
   ${activationPanel(admin)}
