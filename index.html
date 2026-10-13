@@ -425,6 +425,17 @@ table.att td.num{font-variant-numeric:tabular-nums}
 @media (max-width:640px){#editor .sedit{grid-template-columns:1fr}#editor .sedit>.big{max-width:132px;margin:0 auto}}
 .legendbox summary{cursor:pointer;font-size:.8rem;color:var(--muted);padding:2px 0;list-style-position:inside}
 .legendbox[open] summary{margin-bottom:6px}
+.chartlay{display:flex;flex-direction:column;gap:14px}
+@media (min-width:1180px){
+  .main .wrap{max-width:1600px;padding-inline:28px}
+  .chartlay{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:16px;align-items:start}
+  .bpepanel{padding:14px}
+  .bpepanel .row{flex-wrap:wrap;gap:2px}
+  .bpepanel .row .spacer{display:none}
+  .bpepanel .bpe{max-width:none}
+  .bpepanel .f{max-width:none!important}
+  .tooth svg{max-width:52px}
+}
 </style>
 </head>
 <body>

@@ -5,7 +5,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
-const APP_VERSION='13 Oct 2026 · compact chart';
+const APP_VERSION='13 Oct 2026 · wide chart + BPE';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -1616,7 +1616,7 @@ function chartTab(p){
   const legend=[...MODES.filter(m=>m.col).map(m=>[m.label,`background:var(${m.col})`]),...MATS.map(m=>[m.label,`background:var(${m.col})`]),
     ['Crown (CR)','background:#efe6d2;border:2.5px solid var(--t-crown)'],['Implant (IMPL)','background:linear-gradient(90deg,transparent 35%,var(--t-implant) 35% 65%,transparent 65%)'],['Impacted (IMP)','border:2.5px dashed var(--t-imp)'],['Partially erupted (PE)','border:2.5px dashed var(--t-pe)'],['Unerupted (UE)','border:2.5px dotted var(--t-ue)'],['Retained root (RR)','background:var(--t-rr);opacity:.6'],['Veneer (VEN)','background:var(--t-ven)'],['Bridge abutment (ABT) / pontic (PON)','border:2.5px solid var(--t-bridge);border-style:solid dashed'],['Missing (MIS) / extraction (XLA)','background:linear-gradient(45deg,transparent 40%,var(--t-ext) 40% 60%,transparent 60%)'],['Root canal treated (RCT)','background:linear-gradient(90deg,transparent 30%,var(--t-rct) 30% 42%,transparent 42% 58%,var(--t-rct) 58% 70%,transparent 70%)'],['M1–M3 = mobility grade',''],['Has X-ray','background:#2a9d8f;border-radius:50%']];
   const sum=t?summaryOf(p,t):[];
-  return `<section class="panel">
+  return `<div class="chartlay"><section class="panel">
     <div class="row"><h2>Dental chart</h2><span class="spacer"></span>
       <div class="seg" role="radiogroup" aria-label="Dentition">${Object.entries(DENT).map(([k,l])=>`<button type="button" class="${dent===k?'on':''}" data-dent="${k}" role="radio" aria-checked="${dent===k}">${l}</button>`).join('')}</div></div>
     <p class="small muted" style="margin:0">${p.dent?'':(p.dob?'Chosen from the patient\'s age ('+age(p.dob)+' yrs). ':'')}FDI numbering · tap a tooth to chart it.</p>
@@ -1629,12 +1629,12 @@ function chartTab(p){
     <details class="legendbox"><summary>Colour key – what the signs mean</summary><div class="legend">${legend.map(([l,s])=>`<span>${s?`<i style="${s}"></i>`:''}${l}</span>`).join('')}</div></details>
     ${t?editor(p,t,mode,mat,sum):''}
   </section>
-  <section class="panel">
+  <section class="panel bpepanel">
     <div class="row"><h2>BPE</h2><span class="spacer"></span><span class="small muted">Basic Periodontal Examination</span></div>
     <div class="bpe">${p.bpe.map((v,i)=>`<select data-bpe="${i}" id="bpe-${i}" aria-label="Sextant ${['17–14','13–23','24–27','47–44','43–33','34–37'][i]}">${BPE_OPTS.map(o=>`<option ${v===o?'selected':''} value="${o}">${o||'–'}</option>`).join('')}</select>`).join('')}</div>
     <p class="small muted" style="margin:0">Upper: 17–14 · 13–23 · 24–27 &nbsp;|&nbsp; Lower: 47–44 · 43–33 · 34–37. Codes 0–4, * = furcation, X = edentulous. Code 3 or 4 → full periodontal chart.</p>
     <label class="f" style="max-width:220px"><span>Recorded on</span><input type="date" data-bpedate id="bpe-date" value="${esc(p.bpeDate)}"></label>
-  </section>`;
+  </section></div>`;
 }
 function planTab(p){
   const tot=p.plan.reduce((a,i)=>a+(+i.fee||0),0),done=p.plan.filter(i=>i.status==='completed').reduce((a,i)=>a+(+i.fee||0),0);
