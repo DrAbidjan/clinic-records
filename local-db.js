@@ -8,7 +8,7 @@ const DBN='clinic-records-local';
 const LICENSE_PUBLIC_KEY={"kty":"EC","crv":"P-256","x":"6oT1-oIwFPO46SyzpmkPyQ_-_JAQPYNdoW8GbCkdnsA","y":"wnk5D2jCyZHtri9GETUavj9HL4hhV7pYIHULdxtKN1c"};
 const TRIAL_DAYS=14;
 const READONLY_MSG='Your free trial has ended, so the app is read-only. Activate it in Clinic & account → Activation.';
-const TABLES=['users','clinics','members','patients','appointments','xrays','attendance','messages'];
+const TABLES=['users','clinics','members','patients','appointments','xrays','attendance','messages','payments'];
 let idb=null,T={},session=null;const listeners=[];
 const enc=new TextEncoder();
 const now=()=>new Date().toISOString();
@@ -141,7 +141,7 @@ async function rpc(name,a){
   const uid=session.user.id;a=a||{};
   const isAdmin=c=>T.members.some(m=>m.clinic_id===c&&m.user_id===uid&&m.role==='admin');
   const needAdmin=c=>{if(!isAdmin(c))throw err('Only a clinic admin can do this')};
-  if(!['activate','admin_reset_password','new_recovery_code','rename_me'].includes(name)&&!canWrite())return{data:null,error:{message:READONLY_MSG,code:'readonly'}};
+  if(!['activate','admin_reset_password','new_recovery_code','rename_me','set_my_pmdc'].includes(name)&&!canWrite())return{data:null,error:{message:READONLY_MSG,code:'readonly'}};
   try{switch(name){
     case 'create_clinic':{const nm=String(a.p_name||'').trim();if(!nm)throw err('Clinic name is required');const id=uuid();
       T.clinics.push({id,name:nm,address:String(a.p_address||'').trim(),phone:String(a.p_phone||'').trim(),invite_code:code(),reminder_template:'',created_by:uid,created_at:now()});
@@ -159,7 +159,7 @@ async function rpc(name,a){
     case 'add_dentist':{needAdmin(a.p_clinic);const un=norm(a.p_username);if(!/^[a-z0-9._-]{3,}$/.test(un))throw err('Username: at least 3 letters or numbers, no spaces.');
       if(T.users.some(u=>u.username===un))throw err('That username is already taken.');if(String(a.p_password||'').length<8)throw err('Password must be at least 8 characters.');
       const u=await makeUser(un,a.p_password,{full_name:a.p_name});
-      T.members.push({clinic_id:a.p_clinic,user_id:u.id,name:String(a.p_name||'').trim()||un,role:['admin','accountant'].includes(a.p_role)?a.p_role:'dentist',joined_at:now()});await saveT('members');return{data:u.id,error:null}}
+      T.members.push({clinic_id:a.p_clinic,user_id:u.id,name:String(a.p_name||'').trim()||un,role:['admin','accountant'].includes(a.p_role)?a.p_role:'dentist',pmdc:String(a.p_pmdc||'').trim(),joined_at:now()});await saveT('members');return{data:u.id,error:null}}
     case 'activate':{needAdmin(a.p_clinic);const c=T.clinics.find(x=>x.id===a.p_clinic);
       const key=String(a.p_key||'').replace(/\s+/g,'');const p=await verifyKey(key);
       if(!p||p.t==='del')throw err('This activation key is not valid. Copy the whole key exactly as you received it.');
@@ -168,6 +168,7 @@ async function rpc(name,a){
     case 'new_recovery_code':{needAdmin(a.p_clinic);const c=T.clinics.find(x=>x.id===a.p_clinic);
       const raw=code()+code().slice(0,2);const pretty=raw.slice(0,4)+'-'+raw.slice(4,8)+'-'+raw.slice(8,12);
       const salt=hex(crypto.getRandomValues(new Uint8Array(16)));c.recovery={salt,hash:await hash(raw,salt)};await saveT('clinics');return{data:pretty,error:null}}
+    case 'set_my_pmdc':{const mem=T.members.find(m=>m.clinic_id===a.p_clinic&&m.user_id===uid);if(mem){mem.pmdc=String(a.p_pmdc||'').trim();await saveT('members')}return{data:null,error:null}}
     case 'admin_reset_password':{needAdmin(a.p_clinic);if(!T.members.some(m=>m.clinic_id===a.p_clinic&&m.user_id===a.p_user))throw err('Not in this clinic');
       if(String(a.p_password||'').length<8)throw err('Password must be at least 8 characters.');
       const u=T.users.find(x=>x.id===a.p_user);u.salt=hex(crypto.getRandomValues(new Uint8Array(16)));u.hash=await hash(a.p_password,u.salt);await saveT('users');return{data:null,error:null}}

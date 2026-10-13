@@ -301,6 +301,50 @@ table.att td.num{font-variant-numeric:tabular-nums}
 .welcome-card .btn.primary{margin-top:10px;background:#7fd3cb;border-color:#7fd3cb;color:#0b2f36;font-weight:600}
 @media (prefers-reduced-motion:no-preference){.welcome-card{animation:wIn .5s ease-out both}@keyframes wIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}}
 .side-credit{display:none}
+.paysum{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media(max-width:620px){.paysum{grid-template-columns:repeat(2,1fr)}}
+.paysum>div{background:var(--bg);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.paysum span{font-size:.75rem;color:var(--muted)}
+.paysum b{font-size:1.15rem;font-variant-numeric:tabular-nums}
+.paysum .due{background:var(--warn-soft)}.paysum .due b{color:var(--warn)}
+.discbox{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px dashed var(--line);border-radius:12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:var(--paper);padding:7px 14px;min-height:38px;font-weight:500;color:var(--muted);cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--accent);color:var(--paper)}
+.preview{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.88rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.preview b{color:var(--ink)}.preview .due b{color:var(--warn)}.preview .ok b{color:var(--ok)}
+.paytable td{vertical-align:top}
+.tooth{position:relative}
+.xr-dot{position:absolute;top:2px;right:3px;width:8px;height:8px;border-radius:50%;background:#2a9d8f;box-shadow:0 0 0 2px var(--paper)}
+.txr{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--paper)}
+.txr-strip{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px}
+.txr-item{flex:none;width:150px;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--paper);padding:0;text-align:left;cursor:pointer}
+.txr-item:hover{border-color:var(--accent)}
+.txr-cap{display:flex;flex-direction:column;gap:1px;padding:6px 8px;font-size:.74rem;color:var(--muted)}
+.txr-cap b{color:var(--ink);font-size:.8rem}
+.oldform{display:flex;flex-direction:column;gap:12px}
+.oldrows{display:flex;flex-direction:column;gap:6px}
+.oldrow{display:grid;grid-template-columns:150px 80px minmax(0,1fr) 110px;gap:6px}
+@media(max-width:620px){.oldrow{grid-template-columns:1fr 1fr}.oldrow select{grid-column:1/-1}}
+.imp .seg{align-self:flex-start}
+:root{--t-imp:#8e3b5f;--t-pe:#c77d1a;--t-ue:#8a969b;--t-rr:#7a4b2a;--t-ven:#5b8def;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--t-imp:#e08fb4;--t-pe:#f2b45e;--t-ue:#93a3a9;--t-rr:#d1a07a;--t-ven:#9dbcf5;}}
+:root[data-theme="dark"]{--t-imp:#e08fb4;--t-pe:#f2b45e;--t-ue:#93a3a9;--t-rr:#d1a07a;--t-ven:#9dbcf5;}
+.tooth svg{overflow:visible}
+.tooth.prim svg{max-width:34px}
+.tooth.prim{font-size:.68rem}
+.tooth .code{font-size:.6rem;white-space:normal;text-align:center;line-height:1.15;max-width:100%;overflow-wrap:anywhere}
+.opg-in.prim-only{grid-template-columns:repeat(5,minmax(0,1fr)) 8px repeat(5,minmax(0,1fr));min-width:380px;max-width:640px;margin:0 auto}
+.opg-in .rowlab{grid-column:1/-1;font-size:.68rem;color:var(--muted);text-align:center;letter-spacing:.04em;margin:2px 0 -2px}
+.impbox{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--paper)}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media(max-width:620px){.grid3{grid-template-columns:1fr}}
+:root{--bone:#ecdcc0;--gum:#f0a1a6;--enamel:#fffaf0;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bone:#5b4a35;--gum:#b65f6c;--enamel:#efe6d2;}}
+:root[data-theme="dark"]{--bone:#5b4a35;--gum:#b65f6c;--enamel:#efe6d2;}
+.sidebig{max-width:180px;margin:0 auto}
+.sidebig svg{width:100%;height:auto;display:block}
 .toast.success{background:var(--ok);color:var(--paper)}
 .toast.error{background:var(--alert);color:var(--paper)}
 .shell{display:block}
@@ -357,9 +401,9 @@ table.att td.num{font-variant-numeric:tabular-nums}
 <body>
 <div id="app"></div>
 <div class="toast" id="toast" hidden></div>
-<script src="local-db.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="app.js"></script>
-<script>if('serviceWorker' in navigator&&location.protocol==='https:'||location.hostname==='localhost'){navigator.serviceWorker&&navigator.serviceWorker.register('sw.js').catch(()=>{})}</script>
 </body>
 </html>
