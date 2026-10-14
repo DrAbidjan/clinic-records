@@ -494,6 +494,52 @@ table.att td.num{font-variant-numeric:tabular-nums}
 .ownerbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 12px;border-radius:12px;background:#b45309;color:#fff;font-size:.85rem}
 .ownerbar .btn{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.5);color:#fff}
 .credit-copy{display:block;font-size:.7rem;color:var(--muted);margin-top:6px}
+/* v14b: past treatments, earnings tabs, staff, arrival chooser, branding, sounds */
+.pastbox{border-color:var(--accent)}
+.etabs{margin-top:12px;overflow-x:auto;flex-wrap:nowrap}
+.ebody{margin-top:12px;display:flex;flex-direction:column;gap:12px}
+.subpanel{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--paper);display:flex;flex-direction:column;gap:8px}
+.subpanel h3{margin:0}
+.esum>div.good b{color:var(--ok)}
+.esum>div.bad b{color:var(--alert)}
+.paysum.esum{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+.selrow td{background:var(--accent-soft)}
+.payset{display:flex;flex-direction:column;gap:8px;border-top:1px dashed var(--line);padding-top:10px;margin-top:4px}
+.payset .seg label{display:inline-flex;gap:6px;align-items:center;padding:6px 10px;cursor:pointer}
+.expform .grid3{align-items:end}
+.arrivebox{border:2px solid var(--warn);display:flex;flex-direction:column;gap:10px}
+.arrive-opts{display:flex;flex-wrap:wrap;gap:6px}
+.arrive-opts .chip{cursor:pointer}
+.arrive-opts .chip:has(input:checked){border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:600}
+.arrive-opts .chip input{margin:0}
+.brandrow{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.logoprev{width:96px;height:96px;border:1px dashed var(--line);border-radius:14px;display:grid;place-items:center;background:#fff;overflow:hidden}
+.logoprev img{max-width:88px;max-height:88px;object-fit:contain}
+.bgchoices{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
+.bgsw{border:1.5px solid var(--line);border-radius:12px;background:var(--paper);padding:6px;display:flex;flex-direction:column;gap:5px;align-items:stretch;font-size:.76rem;color:var(--ink)}
+.bgsw.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.bgsw i{display:block;height:38px;border-radius:8px;background:var(--bg);border:1px solid var(--line)}
+.bgsw[data-sw=teal] i{background:linear-gradient(135deg,#cfe7e8,#1f5f6b)}
+.bgsw[data-sw=sand] i{background:linear-gradient(135deg,#f6ead6,#d9b98a)}
+.bgsw[data-sw=mint] i{background:linear-gradient(135deg,#e3f6ec,#7cc7a3)}
+.bgsw[data-sw=rose] i{background:linear-gradient(135deg,#fbe6ea,#e59aa8)}
+.bgsw[data-sw=sky] i{background:linear-gradient(135deg,#e4f0fb,#7fb0e0)}
+.bgsw[data-sw=slate] i{background:linear-gradient(135deg,#e6e9ec,#6b7883)}
+.bgsw[data-sw=photo] i{background:repeating-linear-gradient(45deg,var(--bg),var(--bg) 6px,var(--line) 6px,var(--line) 7px)}
+html[data-bg=teal] .main{background:radial-gradient(1200px 600px at 10% -10%,rgba(31,140,150,.22),transparent 60%),radial-gradient(900px 500px at 100% 100%,rgba(31,95,107,.16),transparent 60%) fixed}
+html[data-bg=sand] .main{background:radial-gradient(1200px 600px at 0% 0%,rgba(217,185,138,.30),transparent 60%),radial-gradient(900px 500px at 100% 100%,rgba(200,150,90,.16),transparent 60%) fixed}
+html[data-bg=mint] .main{background:radial-gradient(1200px 600px at 0% 0%,rgba(124,199,163,.26),transparent 60%),radial-gradient(900px 500px at 100% 100%,rgba(60,160,120,.14),transparent 60%) fixed}
+html[data-bg=rose] .main{background:radial-gradient(1200px 600px at 0% 0%,rgba(229,154,168,.26),transparent 60%),radial-gradient(900px 500px at 100% 100%,rgba(200,110,130,.14),transparent 60%) fixed}
+html[data-bg=sky] .main{background:radial-gradient(1200px 600px at 0% 0%,rgba(127,176,224,.28),transparent 60%),radial-gradient(900px 500px at 100% 100%,rgba(70,120,190,.14),transparent 60%) fixed}
+html[data-bg=slate] .main{background:linear-gradient(160deg,rgba(107,120,131,.16),rgba(107,120,131,.04)) fixed}
+html[data-bg=photo] .main{background:linear-gradient(color-mix(in srgb,var(--bg) 84%,transparent),color-mix(in srgb,var(--bg) 84%,transparent)),var(--bgimg) center/cover fixed}
+.clinic-logo{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;background:#fff}
+.side-brand .clinic-logo{width:40px;height:40px;padding:3px}
+.welcome-mark.haslogo{width:auto;height:auto;background:#fff;padding:10px;border-radius:18px}
+.welcome-mark.haslogo .clinic-logo{width:auto;height:auto;max-width:180px;max-height:110px}
+.soundgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.aespill{background:#f3e3f7;color:#7a3a8c}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .aespill{background:#3a2442;color:#e6b8f2}}
 </style>
 </head>
 <body>

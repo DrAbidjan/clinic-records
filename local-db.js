@@ -10,7 +10,7 @@ const DBN=window.__OWNER_TEST?'clinic-owner-test':'clinic-records-local';
 const LICENSE_PUBLIC_KEY={"kty":"EC","crv":"P-256","x":"6oT1-oIwFPO46SyzpmkPyQ_-_JAQPYNdoW8GbCkdnsA","y":"wnk5D2jCyZHtri9GETUavj9HL4hhV7pYIHULdxtKN1c"};
 const TRIAL_DAYS=14;
 const READONLY_MSG='Your free trial has ended, so the app is read-only. Activate it in Clinic & account → Activation.';
-const TABLES=['users','clinics','members','patients','appointments','xrays','attendance','messages','payments'];
+const TABLES=['users','clinics','members','patients','appointments','xrays','attendance','messages','payments','finance'];
 let idb=null,T={},session=null;const listeners=[];
 const enc=new TextEncoder();
 const now=()=>new Date().toISOString();
@@ -80,9 +80,10 @@ async function makeUser(username,password,meta){
 const pub=u=>({id:u.id,email:u.username,user_metadata:clone(u.meta||{})});
 async function setSession(u){session=u?{user:pub(u)}:null;if(u)await put('meta','session',session);else await del('meta','session')}
 
-function stamp(table,row,uid){if(table==='patients'){row.updated_at=now();row.updated_by=uid}}
+function stamp(table,row,uid){if(table==='patients'){row.updated_at=now();row.updated_by=uid}if(table==='finance')row.updated_at=now()}
 function defaults(table,row,uid){
   if(table==='appointments'){if(!row.status)row.status='scheduled';if(row.reminded_at===undefined)row.reminded_at=null;row.created_at=row.created_at||now()}
+  if(table==='finance'){row.created_by=row.created_by||uid;row.created_at=row.created_at||now();if(!row.data)row.data={}}
   if(table==='xrays'){row.uploaded_by=row.uploaded_by||uid;row.created_at=row.created_at||now();row.taken_on=row.taken_on||now().slice(0,10)}
 }
 async function cascade(table,gone){

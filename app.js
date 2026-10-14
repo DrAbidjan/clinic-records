@@ -7,7 +7,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
-const APP_VERSION='14 Oct 2026 · commercial release prep';
+const APP_VERSION='14 Oct 2026 · aesthetics, expenses, salaries, logo, tones';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -175,19 +175,78 @@ let view={screen:'loading',pid:null,tab:'details',tooth:null,q:'',confirm:null,m
 const configured=LOCAL||(/^https:\/\//.test(CONFIG.SUPABASE_URL||'')&&String(CONFIG.SUPABASE_ANON_KEY||'').length>20);
 
 /* Soft UI sounds made in the browser (no sound files). Switch on/off in the sidebar or Clinic & account. */
+/* Sounds: all tones are made by the browser (no sound files). Each computer chooses its own tones and volume. */
+const TONES={
+  none:{label:'No sound',n:[]},
+  tick:{label:'Soft tick',n:[[1250,.05,'triangle',.6]]},
+  pop:{label:'Pop',n:[[880,.06,'sine',.7]]},
+  chime:{label:'Chime (rising)',n:[[660,.14,'sine',1],[990,.22,'sine',.85,.09]]},
+  dingdong:{label:'Ding-dong (door bell)',n:[[988,.35,'sine',1],[784,.5,'sine',.9,.28]]},
+  bell:{label:'Bell',n:[[1046,.9,'sine',.9],[2093,.6,'sine',.25],[1568,.7,'sine',.2,.01]]},
+  triple:{label:'Three beeps',n:[[1175,.08,'square',.35],[1175,.08,'square',.35,.14],[1175,.08,'square',.35,.28]]},
+  marimba:{label:'Marimba',n:[[523,.18,'triangle',1],[659,.18,'triangle',.9,.12],[784,.3,'triangle',.9,.24]]},
+  soft:{label:'Soft low note',n:[[392,.45,'sine',.9]]},
+  alert:{label:'Alert',n:[[880,.12,'sawtooth',.35],[660,.12,'sawtooth',.35,.15],[880,.12,'sawtooth',.35,.3],[660,.18,'sawtooth',.35,.45]]},
+  low:{label:'Low buzz',n:[[220,.18,'square',.5],[165,.24,'square',.45,.12]]}
+};
+const SOUND_EVENTS=[['arrival','Patient arrived','dingdong'],['message','New message','chime'],['success','Saved / done','chime'],['error','Problem / warning','low'],['click','Button tap','tick']];
 const Sound={ctx:null,on:lsGet('sound')!=='off',
   get(){if(!this.ctx){const A=window.AudioContext||window.webkitAudioContext;if(!A)return null;this.ctx=new A()}if(this.ctx.state==='suspended')this.ctx.resume();return this.ctx},
+  vol(){const v=parseFloat(lsGet('soundVol'));return isNaN(v)?0.7:Math.min(1,Math.max(0,v))},
   tone(freq,dur,type,vol,delay){const c=this.get();if(!c)return;const t0=c.currentTime+(delay||0);const o=c.createOscillator(),g=c.createGain();
-    o.type=type||'sine';o.frequency.setValueAtTime(freq,t0);g.gain.setValueAtTime(0.0001,t0);g.gain.exponentialRampToValueAtTime(vol||0.06,t0+0.008);g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    o.type=type||'sine';o.frequency.setValueAtTime(freq,t0);g.gain.setValueAtTime(0.0001,t0);g.gain.exponentialRampToValueAtTime(Math.max(0.0002,vol||0.06),t0+0.008);g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
     o.connect(g).connect(c.destination);o.start(t0);o.stop(t0+dur+0.02)},
-  play(kind){if(!this.on)return;try{
-    if(kind==='click')this.tone(1250,0.05,'triangle',0.035);
-    else if(kind==='tab')this.tone(880,0.06,'sine',0.04);
-    else if(kind==='success'){this.tone(660,0.14,'sine',0.06);this.tone(990,0.22,'sine',0.05,0.09)}
-    else if(kind==='error'){this.tone(220,0.18,'square',0.03);this.tone(165,0.24,'square',0.025,0.12)}
-  }catch(e){}},
+  preset(name,force){const p=TONES[name];if(!p)return;const base=(name==='tick'||name==='pop'?0.05:0.09)*this.vol();try{p.n.forEach(([f,d,t,v,dl])=>this.tone(f,d,t,base*(v||1),dl||0))}catch(e){}},
+  toneFor(kind){const ev=SOUND_EVENTS.find(e=>e[0]===kind);return lsGet('tone:'+kind)||(ev?ev[2]:'tick')},
+  play(kind){if(!this.on)return;if(kind==='tab')kind='click';this.preset(this.toneFor(kind))},
   toggle(){this.on=!this.on;lsSet('sound',this.on?'on':'off');if(this.on)this.play('success')}
 };
+/* Clinic logo and screen background (admin sets them; saved for the whole clinic) */
+let branding={},brandingId=null,brandingErr='';
+const BG_CHOICES=[['','Plain'],['teal','Teal glow'],['sand','Warm sand'],['mint','Fresh mint'],['rose','Soft rose'],['sky','Sky blue'],['slate','Slate'],['photo','My own photo']];
+async function loadBranding(){
+  try{const {data,error}=await sb.from('finance').select('*').eq('clinic_id',clinic.id).eq('kind','branding');if(error)throw error;
+    const r=(data||[])[0];branding=r?(r.data||{}):{};brandingId=r?r.id:null;brandingErr=''}
+  catch(e){branding={};brandingId=null;brandingErr=/finance|relation|does not exist|schema cache/i.test(e.message||'')?'needsql':friendly(e)}
+  applyBranding();
+}
+function applyBranding(){
+  const root=document.documentElement;const bg=branding.bg||'';
+  if(bg)root.dataset.bg=bg;else delete root.dataset.bg;
+  if(bg==='photo'&&branding.bgImage)root.style.setProperty('--bgimg',`url("${branding.bgImage}")`);else root.style.removeProperty('--bgimg');
+}
+async function saveBranding(patch){
+  const data=Object.assign({},branding,patch);
+  if(brandingId){const {error}=await sb.from('finance').update({data}).eq('id',brandingId);if(error)throw error}
+  else{const {data:out,error}=await sb.from('finance').insert({clinic_id:clinic.id,kind:'branding',data}).select();if(error)throw error;const r=Array.isArray(out)?out[0]:out;brandingId=r&&r.id}
+  branding=data;applyBranding();
+}
+function resizeImage(file,max,type,quality){return new Promise((res,rej)=>{const img=new Image(),url=URL.createObjectURL(file);
+  img.onload=()=>{const k=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.width*k));c.height=Math.max(1,Math.round(img.height*k));
+    const g=c.getContext('2d');if(type==='image/jpeg'){g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height)}g.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);res(c.toDataURL(type,quality))};
+  img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('That picture could not be opened. Use a JPG or PNG.'))};img.src=url})}
+const clinicMark=()=>branding.logo?`<img class="clinic-logo" src="${esc(branding.logo)}" alt="${esc(clinic?clinic.name:'')} logo">`:toothMark();
+function brandingPanel(){
+  if(!isAdmin())return '';
+  if(brandingErr==='needsql')return `<section class="panel"><h3>Clinic logo &amp; background</h3><div class="msg warn">This needs one small database update. Open <b>Supabase → SQL Editor</b>, paste <b>supabase-update-finance.sql</b> and press <b>Run</b>, then reload.</div></section>`;
+  const bg=branding.bg||'';
+  return `<section class="panel"><h3>Clinic logo &amp; background</h3>
+    <div class="brandrow"><div class="logoprev">${branding.logo?`<img src="${esc(branding.logo)}" alt="Clinic logo">`:`<span class="muted small">No logo</span>`}</div>
+      <div style="display:flex;flex-direction:column;gap:6px"><p class="small muted" style="margin:0">Your logo shows in the menu, on the welcome screen and on every printout. PNG or JPG; it is made small automatically.</p>
+      <div class="row"><label class="btn small primary filebtn">${branding.logo?'Change logo':'Upload logo'}<input type="file" id="brand-logo" accept="image/png,image/jpeg,image/webp"></label>${branding.logo?'<button class="btn small" data-act="logoRemove">Remove logo</button>':''}</div></div></div>
+    <p class="small" style="margin:6px 0 0"><b>Background of the main screen</b> (for everyone in the clinic)</p>
+    <div class="bgchoices">${BG_CHOICES.map(([k,l])=>`<button type="button" class="bgsw ${bg===k?'on':''}" data-bgset="${k}" data-sw="${k||'plain'}" aria-pressed="${bg===k}"><i></i><span>${l}</span></button>`).join('')}</div>
+    ${bg==='photo'||view.bgPhoto?`<div class="row"><label class="btn small filebtn">${branding.bgImage?'Change photo':'Choose photo'}<input type="file" id="brand-bg" accept="image/png,image/jpeg,image/webp"></label><span class="small muted">A calm photo works best; it is faded so text stays easy to read.</span></div>`:''}
+  </section>`;
+}
+function soundsPanel(){
+  return `<section class="panel"><h3>Sounds on this computer</h3>
+    <p class="small muted" style="margin:0">Choose a tone for each event. Each computer keeps its own choice.</p>
+    <div class="row"><label class="row small" style="gap:8px"><input type="checkbox" id="snd-on" ${Sound.on?'checked':''} style="width:20px;height:20px"> Sounds on</label>
+      <label class="row small" style="gap:8px;flex:1;min-width:200px">Volume <input type="range" id="snd-vol" min="0" max="1" step="0.05" value="${Sound.vol()}" style="flex:1"></label></div>
+    <div class="soundgrid">${SOUND_EVENTS.map(([k,l])=>`<label class="f"><span>${l}</span><div class="row" style="gap:6px;flex-wrap:nowrap"><select data-tonefor="${k}" style="flex:1">${Object.entries(TONES).map(([t,o])=>`<option value="${t}" ${Sound.toneFor(k)===t?'selected':''}>${o.label}</option>`).join('')}</select><button type="button" class="btn small" data-tonetest="${k}" aria-label="Play ${l} tone">▶</button></div></label>`).join('')}</div>
+  </section>`;
+}
 document.addEventListener('pointerdown',e=>{const el=e.target.closest('button,.btn,[data-surf],a.btn,select');if(!el||el.disabled)return;
   Sound.play(el.classList.contains('tab')||el.dataset.tab||el.dataset.home?'tab':'click')},true);
 function toastKind(m){if(/not |wrong|could not|invalid|expired|only |first|ended|cannot|can't|doesn't|failed|too many|no internet|match/i.test(m))return 'error';
@@ -273,7 +332,7 @@ function subscribe(){
     if(view.screen==='patient'&&view.tab==='pay'&&view.pid)loadPayments(view.pid).then(()=>softRender()).catch(()=>{});
   }).on('postgres_changes',{event:'INSERT',schema:'public',table:'messages',filter:'clinic_id=eq.'+clinic.id},pl=>{
     const m=pl.new;if(!m||msgs.some(x=>x.id===m.id))return;msgs.push(m);
-    if(forMe(m)&&m.sender!==user.id){Sound.play('success');
+    if(forMe(m)&&m.sender!==user.id){Sound.play(m.kind==='arrived'?'arrival':'message');
       if(view.screen==='msgs')markRead().then(()=>softRender());
       else{const t=$('#toast');t.textContent=(m.kind==='arrived'?'':'New message from '+m.sender_name+': ')+m.body;t.className='toast success';t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,5000);softRender()}}
   }).subscribe();
@@ -302,7 +361,7 @@ async function boot(){
   if(!session){view.screen='auth';render();return}
   user=session.user;await afterLogin();
 }
-function resetState(){earn.unlockedAt=0;earn.pays=null;earn.mode='';earn.err='';if(chan&&sb)sb.removeChannel(chan);chan=null;user=null;memberships=[];clinic=null;me=null;team=[];db={patients:[]};dirty.clear();setSync('saved')}
+function resetState(){branding={};brandingId=null;brandingErr='';try{applyBranding()}catch(e){}earn.unlockedAt=0;earn.pays=null;fin.rows=null;earn.mode='';earn.err='';if(chan&&sb)sb.removeChannel(chan);chan=null;user=null;memberships=[];clinic=null;me=null;team=[];db={patients:[]};dirty.clear();setSync('saved')}
 function normClinic(c){
   if(!c||LOCAL)return c;
   c.clinic_code=String(c.id).replace(/-/g,'').slice(0,10).toUpperCase().replace(/^(.{5})/,'$1-');
@@ -323,7 +382,7 @@ async function openClinic(m){
   if(dirty.size)await flush();
   clinic=m.clinics;me={user_id:user.id,name:m.name,role:m.role,pmdc:m.pmdc||''};lsSet('clinicId',clinic.id);
   view.screen='loading';render();
-  try{db={patients:[]};await Promise.all([loadPatients(),loadTeam()]);}
+  try{db={patients:[]};await Promise.all([loadPatients(),loadTeam(),loadBranding()]);}
   catch(e){view.screen='error';view.msg={t:'err',m:friendly(e)};render();return}
   subscribe();
   setTimeout(prepareDaily,1500);startAttendance();loadMessages().then(()=>{const n=unreadCount();if(n){render();setTimeout(()=>toast('You have '+n+' new message'+(n>1?'s':'')+' – open Messages'),400)}});
@@ -349,7 +408,8 @@ function buildRecord(p,date){
   const sec=t=>{ensure(14);y+=3;doc.setFillColor(225,238,239);doc.rect(M,y-4,CW,6.5,'F');doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(...ACC);doc.text(t.toUpperCase(),M+2,y);y+=7;doc.setTextColor(...INK);doc.setFont('helvetica','normal');doc.setFontSize(9.5);};
   const para=t=>{const lines=doc.splitTextToSize(clean(t),CW);for(const l of lines){ensure(5);doc.text(l,M,y);y+=4.6;}};
   doc.setFillColor(...ACC);doc.rect(0,0,W,3,'F');
-  doc.setFont('helvetica','bold');doc.setFontSize(17);doc.setTextColor(...INK);doc.text('Treatment Record',M,y+4);
+  let tx=M;const LG=branding&&branding.logo;if(LG){try{const fm=/^data:image\/png/.test(LG)?'PNG':'JPEG';const ip=doc.getImageProperties(LG);const h=13,w=Math.min(32,h*ip.width/ip.height);doc.addImage(LG,fm,M,y-4.5,w,h);tx=M+w+4}catch(e){}}
+  doc.setFont('helvetica','bold');doc.setFontSize(17);doc.setTextColor(...INK);doc.text('Treatment Record',tx,y+4);
   doc.setFontSize(10.5);doc.text(clean(clinic.name),W-M,y+4,{align:'right'});
   doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(...MUT);
   const cl2=[clinic.address,clinic.phone].filter(Boolean).join('  ·  ');if(cl2)doc.text(clean(cl2),W-M,y+8.5,{align:'right'});
@@ -363,7 +423,7 @@ function buildRecord(p,date){
   kv.forEach(([k,v],i)=>{const x=M+(i%2)*(CW/2);if(i%2===0)ensure(6);doc.setTextColor(...MUT);doc.setFontSize(8);doc.text(k,x,y);doc.setTextColor(...INK);doc.setFontSize(9.5);doc.text(doc.splitTextToSize(clean(v),CW/2-26)[0]||'',x+24,y);if(i%2===1)y+=5.5;});
   const al=alertsOf(p);sec('Medical alerts');
   if(al.length){doc.setTextColor(...RED);doc.setFont('helvetica','bold');para(al.join('  ·  '));doc.setFont('helvetica','normal');doc.setTextColor(...INK);
-    const ans=p.mh.answers;MH.forEach(([k])=>{if(ans[k]&&ans[k].v==='y'&&ans[k].d)para('– '+(ALERT_KEYS[k]||'Note')+': '+ans[k].d);});}
+    const ans=p.mh.answers;const KK=isAes(p)?AES_ALERT_KEYS:ALERT_KEYS;(isAes(p)?AES_MH:MH).forEach(([k])=>{if(ans[k]&&ans[k].v==='y'&&ans[k].d)para('– '+(KK[k]||'Note')+': '+ans[k].d);});}
   else para('No medical alerts recorded.');
   if(p.mh.meds)para('Medicines: '+p.mh.meds);
   const habits=[p.mh.smoke&&'Smoking: '+p.mh.smoke,p.mh.tobacco&&'Paan / gutka / naswar: '+p.mh.tobacco].filter(Boolean);if(habits.length)para(habits.join('   ·   '));
@@ -372,7 +432,7 @@ function buildRecord(p,date){
   sec('Treatment carried out on '+fmtDate(date));
   if(done.length){
     const cx=[M,M+18,M+120];doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(...MUT);
-    ['Tooth','Treatment','Surfaces'].forEach((h,i)=>doc.text(h,cx[i],y));doc.text('Fee',W-M,y,{align:'right'});y+=2;doc.line(M,y,W-M,y);y+=4.5;
+    (isAes(p)?['Area','Treatment','Amount']:['Tooth','Treatment','Surfaces']).forEach((h,i)=>doc.text(h,cx[i],y));doc.text('Fee',W-M,y,{align:'right'});y+=2;doc.line(M,y,W-M,y);y+=4.5;
     doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor(...INK);let tot=0;
     done.forEach(i=>{ensure(6);doc.text(clean(i.tooth||'–'),cx[0],y);doc.text(doc.splitTextToSize(clean(i.proc),98)[0],cx[1],y);doc.text(clean(i.surf||''),cx[2],y);doc.text(money(i.fee),W-M,y,{align:'right'});tot+=+i.fee||0;y+=5.5;});
     doc.line(M,y-3.5,W-M,y-3.5);doc.setFont('helvetica','bold');doc.text('Total today',cx[1],y+0.5);doc.text(money(tot),W-M,y+0.5,{align:'right'});doc.setFont('helvetica','normal');y+=6;
@@ -388,10 +448,11 @@ function buildRecord(p,date){
   sec('Treatment still planned');
   if(open.length)open.sort((a,b)=>a.phase-b.phase).forEach(i=>para('Phase '+i.phase+'   '+(i.tooth?i.tooth+'  ':'')+i.proc+(i.surf?' ('+i.surf+')':'')+'   '+money(i.fee)));
   else para('Treatment plan complete.');
-  const cl=chartLines(p);
+  if(isAes(p)){if(p.mh.fitz||p.mh.concern){sec('Skin and concerns');if(p.mh.fitz)para('Skin type (Fitzpatrick): '+p.mh.fitz);if(p.mh.concern)para('Main concern: '+p.mh.concern);if(p.mh.hairloss)para('Hair loss: '+p.mh.hairloss)}}
+  else{const cl=chartLines(p);
   sec('Current chart findings (FDI)');
-  if(cl.length)cl.forEach(l=>para(l));else para('No findings charted.');
-  if(p.bpe.some(Boolean))para('BPE: '+p.bpe.slice(0,3).map(v=>v||'–').join(' / ')+'  |  '+p.bpe.slice(3).map(v=>v||'–').join(' / ')+(p.bpeDate?'   ('+fmtDate(p.bpeDate)+')':''));
+  if(cl.length)cl.forEach(l=>para(l));else para('No findings charted.');}
+  if(!isAes(p)&&p.bpe.some(Boolean))para('BPE: '+p.bpe.slice(0,3).map(v=>v||'–').join(' / ')+'  |  '+p.bpe.slice(3).map(v=>v||'–').join(' / ')+(p.bpeDate?'   ('+fmtDate(p.bpeDate)+')':''));
   ensure(26);y+=14;doc.setDrawColor(...INK);
   doc.line(M,y,M+70,y);doc.line(M+90,y,M+130,y);doc.line(M+140,y,W-M,y);
   doc.setFontSize(8);doc.setTextColor(...MUT);doc.text('Dentist signature',M,y+4);doc.text(clean(dentistLine(me)),M,y+8);doc.text('Date',M+90,y+4);doc.text('Patient signature',M+140,y+4);
@@ -486,7 +547,7 @@ async function readImportFile(file){
   render();
 }
 function importRowToPatient(r){
-  const p=blankPatient();Object.assign(p,{first:r.first||'–',last:r.last||'',dob:r.dob,sex:r.sex,phone:r.phone,cnic:r.cnic,address:r.address,email:r.email,oldFile:r.oldFile,since:r.since});
+  const p=blankPatient();if(view.impSec==='aes')p.kind='aesthetic';Object.assign(p,{first:r.first||'–',last:r.last||'',dob:r.dob,sex:r.sex,phone:r.phone,cnic:r.cnic,address:r.address,email:r.email,oldFile:r.oldFile,since:r.since});
   const d=r.since||today();
   if(r.history||r.past)p.notes.push({id:uid(),date:d,title:'Old records',by:me.name,text:[r.history&&('Medical history: '+r.history),r.past&&('Past treatment: '+r.past)].filter(Boolean).join('\n')});
   if(r.history){p.mh.answers.other={v:'y',d:r.history}}
@@ -514,7 +575,7 @@ function oldHandForm(){
       <div class="oldrows">${Array.from({length:n},(_,i)=>`<div class="oldrow">
         <input type="date" id="or-date-${i}" max="${today()}" aria-label="Date done">
         <input type="text" id="or-tooth-${i}" placeholder="Tooth" aria-label="Tooth">
-        <select id="or-proc-${i}" aria-label="Treatment"><option value="">Treatment…</option>${PROCS.map(o=>`<option>${o}</option>`).join('')}</select>
+        <select id="or-proc-${i}" aria-label="Treatment"><option value="">Treatment…</option>${(view.impSec==='aes'?AES_PROCS:PROCS).map(o=>`<option>${esc(o)}</option>`).join('')}</select>
         <input type="number" id="or-fee-${i}" placeholder="Fee Rs" min="0" step="1" inputmode="numeric" aria-label="Fee"></div>`).join('')}</div>
       <div class="row"><button type="button" class="btn small" data-act="oldMoreRows">+ More rows</button></div></div>
     <label class="f"><span>Other notes from the old file</span><textarea id="op-notes" rows="2"></textarea></label>
@@ -634,7 +695,8 @@ function pdfBase(title){
   const clean=s=>String(s??'').replace(/[^\n\x20-\x7E -ÿ–—•…‘’“”]/g,'');
   const C={ACC:[31,95,107],MUT:[93,107,114],INK:[24,35,42],LINE:[200,209,207],SOFT:[225,238,239]};
   doc.setFillColor(...C.ACC);doc.rect(0,0,W,3,'F');
-  doc.setFont('helvetica','bold');doc.setFontSize(18);doc.setTextColor(...C.INK);doc.text(title,M,st.y+4);
+  let tx=M;const LG=branding&&branding.logo;if(LG){try{const fm=/^data:image\/png/.test(LG)?'PNG':'JPEG';const ip=doc.getImageProperties(LG);const h=13,w=Math.min(32,h*ip.width/ip.height);doc.addImage(LG,fm,M,st.y-4.5,w,h);tx=M+w+4}catch(e){}}
+  doc.setFont('helvetica','bold');doc.setFontSize(18);doc.setTextColor(...C.INK);doc.text(title,tx,st.y+4);
   doc.setFontSize(11);doc.text(clean(clinic.name),W-M,st.y+4,{align:'right'});
   doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(...C.MUT);
   const cl2=[clinic.address,clinic.phone].filter(Boolean).join('  ·  ');if(cl2)doc.text(clean(cl2),W-M,st.y+8.5,{align:'right'});
@@ -656,7 +718,7 @@ function buildInvoice(p){
   if(me.pmdc||me.role!=='accountant'){P.kv('Dentist',dentistLine(me),M,170);st.y+=13}else st.y+=1;
   const xs=[M,M+24,M+40,W-M];
   P.sec('Treatment done');
-  if(b.done.length){P.row(['Date','Tooth','Treatment','Fee'],xs,{bold:true,size:8.5,color:C.MUT,right:[3],w:[22,14,110,40]});doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);
+  if(b.done.length){P.row(['Date',isAes(p)?'Area':'Tooth','Treatment','Fee'],xs,{bold:true,size:8.5,color:C.MUT,right:[3],w:[22,14,110,40]});doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);
     b.done.forEach(i=>P.row([i.doneDate?fmtDate(i.doneDate):'',i.tooth||'–',i.proc+(i.surf?' ('+i.surf+')':''),money(i.fee)],xs,{right:[3],w:[22,14,110,40]}));}
   else P.row(['No treatment completed yet.'],[M],{color:C.MUT});
   if(b.planned.length){P.sec('Treatment still planned (not charged yet)');
@@ -752,7 +814,7 @@ async function refreshAppts(){
   }catch(e){toast(friendly(e))}
   apptsLoading=false;softRender();
 }
-function homeNav(active){return `<nav class="tabs homenav desk-hide" role="tablist"><button class="tab" role="tab" aria-selected="${active==='list'}" data-home="list">Patients</button><button class="tab" role="tab" aria-selected="${active==='appts'}" data-home="appts">Appointments</button><button class="tab" role="tab" aria-selected="${active==='msgs'}" data-home="msgs">Messages${unreadCount()?' ('+unreadCount()+')':''}</button>${isAdmin()?`<button class="tab" role="tab" aria-selected="${active==='earn'}" data-home="earn">Earnings</button>`:''}</nav>`}
+function homeNav(active){return `<nav class="tabs homenav desk-hide" role="tablist"><button class="tab" role="tab" aria-selected="${active==='list'}" data-home="list">Patients</button><button class="tab" role="tab" aria-selected="${active==='aes'}" data-home="aes">Aesthetics</button><button class="tab" role="tab" aria-selected="${active==='appts'}" data-home="appts">Appointments</button><button class="tab" role="tab" aria-selected="${active==='msgs'}" data-home="msgs">Messages${unreadCount()?' ('+unreadCount()+')':''}</button>${isAdmin()?`<button class="tab" role="tab" aria-selected="${active==='earn'}" data-home="earn">Earnings</button>`:''}</nav>`}
 /* Team messages on this device: "patient arrived" notes and messages between staff. */
 let msgs=[];
 async function loadMessages(){if(!clinic)return;const {data}=await sb.from('messages').select('*').eq('clinic_id',clinic.id).order('created_at');msgs=(data||[]).slice(-300)}
@@ -764,13 +826,24 @@ async function sendMessage(to,text,extra){
 }
 async function markRead(){const un=msgs.filter(m=>forMe(m)&&!(m.read_by||[]).includes(user.id));
   for(const m of un){m.read_by=(m.read_by||[]).concat(user.id);await sb.from('messages').update({read_by:m.read_by}).eq('id',m.id)}}
+function arriveChooser(){
+  const a=view.arriveFor&&apptsDay.find(x=>x.id===view.arriveFor);if(!a)return '';
+  const p=db.patients.find(x=>x.id===a.patient_id);const docs=team.filter(t=>t.role!=='accountant');
+  const pre=a.dentist_id&&docs.some(t=>t.user_id===a.dentist_id)?a.dentist_id:'all';
+  return `<section class="panel arrivebox" role="dialog" aria-label="Patient arrived">
+    <b>${esc(p?p.first+' '+p.last:'Patient')} has arrived – who should be told?</b>
+    <div class="arrive-opts">${docs.map(t=>`<label class="chip ${pre===t.user_id?'on':''}"><input type="radio" name="arr-to" value="${esc(t.user_id)}" ${pre===t.user_id?'checked':''}> ${esc(t.name)}${t.user_id===a.dentist_id?' <small>(booked)</small>':''}${t.user_id===user.id?' <small>(you)</small>':''}</label>`).join('')}
+      <label class="chip ${pre==='all'?'on':''}"><input type="radio" name="arr-to" value="all" ${pre==='all'?'checked':''}> Everyone</label></div>
+    <div class="row"><button class="btn primary" data-arrsend="${a.id}">Send – patient arrived</button><button class="btn" data-act="arrCancel">Cancel</button></div>
+  </section>`;
+}
 function msgsView(){
   const others=team.filter(x=>x.user_id!==user.id);
   const list=msgs.filter(m=>forMe(m)||m.sender===user.id);
   const todays=apptsDay.filter(a=>dayOf(a.starts_at)===today()&&a.status==='scheduled');
   let lastDay='';
   return `
-  ${clockMini()}
+  ${clockMini()}${arriveChooser()}
   <header class="top"><div style="min-width:0"><h1>Messages</h1><div class="sub">${LOCAL?'Notes between the team on this device':'Notes between the team – they appear on every computer at once'}</div></div><button class="btn small desk-hide" data-act="settings">Clinic & account</button></header>
   ${homeNav('msgs')}
   <section class="panel chat">
@@ -791,7 +864,7 @@ function apptCard(a,showPatient){
   return `<div class="appt ${esc(a.status)}">
     <div class="tm"><b>${showPatient?hhmm(a.starts_at):fmtDate(dayOf(a.starts_at))}</b><span>${showPatient?a.duration+' min':hhmm(a.starts_at)}</span></div>
     <div class="ai">
-      ${showPatient&&p?`<button class="linkbtn pn" data-open="${a.patient_id}">${esc(nm)}</button>`:showPatient?`<b>${esc(nm)}</b>`:''}
+      ${showPatient&&p?`<button class="linkbtn pn" data-open="${a.patient_id}">${esc(nm)}</button>`:showPatient?`<b>${esc(nm)}</b>`:''}${showPatient&&isAes(p)?' <span class="pill aespill">Aesthetic</span>':''}
       <span class="small">${esc(a.reason||'Appointment')}${dn?' · '+esc(dn.name):''}${a.note?' · '+esc(a.note):''}</span>
       <span class="alerts"><span class="pill ${st[1]}">${st[0]}</span>${a.reminded_at?`<span class="pill ok">Reminder opened ${fmtTime(a.reminded_at)}</span>`:(upcoming?'<span class="pill warn">No reminder yet</span>':'')}${p&&!phone?'<span class="pill alert">No mobile number</span>':''}</span>
       ${upcoming&&phone?`<div class="row"><button class="btn small primary" data-sms="${a.id}">SMS reminder</button><button class="btn small wa" data-wa="${a.id}">WhatsApp</button></div>`:''}
@@ -805,7 +878,7 @@ function apptsView(){
   const act=apptsDay.filter(a=>a.status!=='cancelled');
   const need=apptsDay.filter(a=>a.status==='scheduled'&&!a.reminded_at).length;
   return `
-  ${clockMini()}
+  ${clockMini()}${arriveChooser()}
   <header class="top">
     <div style="min-width:0"><h1>${esc(clinic.name)}</h1><div class="sub">${esc(me.name)} ${syncBadge()}</div></div>
     <button class="btn small desk-hide" data-act="settings">Clinic & account</button>
@@ -963,14 +1036,14 @@ function folderPanel(){
 function xrayTab(p){
   const fmtSize=b=>b>1e6?(b/1e6).toFixed(1)+' MB':Math.round(b/1e3)+' KB';
   return `<section class="panel">
-    <h2>Add X-ray</h2>
+    <h2>${isAes(p)?'Add before / after photo':'Add X-ray'}</h2>
     <div class="grid2">
-      <label class="f"><span>Type</span><select id="xr-kind">${XR_KINDS.map(k=>`<option ${k===(view.xrKind||'Periapical (PA)')?'selected':''}>${k}</option>`).join('')}</select></label>
+      <label class="f"><span>Type</span><select id="xr-kind">${(isAes(p)?AES_PHOTO_KINDS:XR_KINDS).map(k=>`<option ${k===(view.xrKind||(isAes(p)?'Before photo':'Periapical (PA)'))?'selected':''}>${k}</option>`).join('')}</select></label>
       <label class="f"><span>Date taken</span><input type="date" id="xr-date" value="${today()}"></label>
       <label class="f"><span>Teeth (FDI)</span><input type="text" id="xr-teeth" placeholder="e.g. 36, 37 or full mouth"></label>
       <label class="f"><span>Note (optional)</span><input type="text" id="xr-note" placeholder="e.g. periapical radiolucency 36"></label>
     </div>
-    <label class="btn primary filebtn ${xrBusy?'busy':''}">${xrBusy?'Uploading…':'Take photo or choose X-ray'}<input type="file" id="xr-file" accept="image/*,application/pdf" multiple ${xrBusy?'disabled':''}></label>
+    <label class="btn primary filebtn ${xrBusy?'busy':''}">${xrBusy?'Uploading…':isAes(p)?'Take photo or choose picture':'Take photo or choose X-ray'}<input type="file" id="xr-file" accept="image/*,application/pdf" multiple ${xrBusy?'disabled':''}></label>
     <p class="small muted" style="margin:0">On a phone you can photograph the X-ray screen or film, or pick images and PDFs from Photos or Files. Large photos are reduced to about 3000 pixels to save space.</p>
   </section>
   ${cameraPanel()}
@@ -1001,7 +1074,55 @@ function xrViewer(){
 }
 
 /* ---------- alerts ---------- */
-function alertsOf(p){const a=[];const ans=p.mh.answers;for(const k in ALERT_KEYS){if(ans[k]&&ans[k].v==='y')a.push(ALERT_KEYS[k]);}return a}
+/* ---- Aesthetics (face, skin, laser, hair) – kept apart from dental patients ---- */
+const isAes=p=>!!p&&p.kind==='aesthetic';
+const AES_GROUPS=[
+ ['Consultation',['Aesthetic consultation','Skin analysis','Hair loss consultation','Review / follow-up','Touch-up']],
+ ['Injectables',['Botox – forehead lines','Botox – frown lines','Botox – crow\'s feet','Botox – full face','Botox – jaw (masseter) slimming','Botox – underarm sweating','Filler – lips','Filler – cheeks','Filler – under-eye (tear trough)','Filler – jawline','Filler – chin','Filler – nose (non-surgical nose job)','Filler – nasolabial folds','Skin booster','Polynucleotides (PN / PDRN)','Exosomes – face','PRP – face','Fat-dissolving injection (double chin)','Mesotherapy – face','Thread lift (PDO threads)']],
+ ['Laser & devices',['Laser hair removal – face','Laser hair removal – underarms','Laser hair removal – arms','Laser hair removal – legs','Laser hair removal – bikini','Laser hair removal – full body','Carbon laser peel','Fractional CO2 laser','Laser skin resurfacing','Q-switched laser – pigmentation / melasma','Laser tattoo removal','IPL photofacial','Radiofrequency (RF) skin tightening','RF microneedling','HIFU skin lifting','Laser – spider veins','Cryolipolysis (fat freezing)','Body contouring / cavitation']],
+ ['Facials & peels',['Hydra facial (hydradermabrasion)','Medi-facial','Acne facial & extraction','Chemical peel – light','Chemical peel – medium','Microdermabrasion','Microneedling','Dermaplaning','Skin brightening facial','Oxygen facial']],
+ ['Skin treatments',['Acne treatment','Acne scar treatment','Pigmentation / melasma treatment','Under-eye dark circle treatment','Stretch mark treatment','Scar treatment','Mole removal','Skin tag removal','Wart removal','Milia removal','Rosacea treatment','Wrinkle treatment']],
+ ['Drips & supplements',['IV drip – vitamin','IV drip – glutathione (brightening)','IV drip – hydration']],
+ ['Hair',['Hair transplant – FUE','Hair transplant – DHI','Beard transplant','Eyebrow transplant','PRP – hair','GFC – hair (growth factor concentrate)','Exosomes – hair','Mesotherapy – hair','Scalp micropigmentation','Hair loss treatment (medicines)']],
+ ['Other',['Body treatment','Other aesthetic treatment']]
+];
+const AES_PROCS=AES_GROUPS.flatMap(g=>g[1]);
+const AES_PHASES=[[1,'Consultation & tests'],[2,'Main treatment'],[3,'Course of sessions'],[4,'Maintenance & touch-up'],[5,'Aftercare & review']];
+const procsFor=p=>isAes(p)?AES_PROCS:PROCS;
+const phasesFor=p=>isAes(p)?AES_PHASES:PHASES;
+const procOptions=(p,sel)=>isAes(p)?AES_GROUPS.map(([g,l])=>`<optgroup label="${esc(g)}">${l.map(o=>`<option ${o===sel?'selected':''}>${esc(o)}</option>`).join('')}</optgroup>`).join(''):PROCS.map(o=>`<option ${o===sel?'selected':''}>${esc(o)}</option>`).join('');
+const AES_MH=[
+ ['a_preg','Pregnant, trying to get pregnant, or breastfeeding'],
+ ['a_isotret','Isotretinoin (Accutane / Roaccutane) in the last 6 months'],
+ ['a_thin','Blood thinners or aspirin; bleeds or bruises easily'],
+ ['a_keloid','Keloid or thick (raised) scars'],
+ ['a_herpes','Cold sores (herpes)'],
+ ['a_autoimm','Autoimmune disease (lupus, vitiligo, psoriasis, others)'],
+ ['a_diab','Diabetes'],
+ ['a_epil','Epilepsy or fits'],
+ ['a_metal','Pacemaker, metal implants or plates (important for RF devices)'],
+ ['a_photo','Light-sensitive skin or photosensitising medicines'],
+ ['a_tan','Recent sun tan, sunbed or self-tan (last 4 weeks)'],
+ ['a_infect','Active skin infection, open wounds or active acne in the area'],
+ ['a_neuro','Muscle or nerve disease (e.g. myasthenia gravis) – important for Botox'],
+ ['a_prevfill','Previous fillers, Botox or threads (which, where, when)'],
+ ['a_prevsurg','Previous cosmetic surgery or hair transplant'],
+ ['a_hep','Hepatitis B or C, HIV'],
+ ['a_allergy','Allergies (lidocaine / local anaesthetic, hyaluronic acid, latex, eggs, other)'],
+ ['a_steroid','Steroid tablets or creams in the last 3 months'],
+ ['a_other','Any other illness or medicine']
+];
+const AES_ALERT_KEYS={a_preg:'Pregnant / breastfeeding',a_isotret:'Isotretinoin',a_thin:'Blood thinner',a_keloid:'Keloid scars',a_herpes:'Cold sores',a_metal:'Metal implant',a_allergy:'Allergy',a_hep:'Infection risk',a_neuro:'Neuromuscular disease',a_epil:'Epilepsy',a_diab:'Diabetes',a_autoimm:'Autoimmune disease'};
+const FITZ=['','I – very fair, always burns','II – fair, usually burns','III – medium, sometimes burns','IV – olive / light brown, rarely burns','V – brown, very rarely burns','VI – dark brown / black, never burns'];
+const AES_PHOTO_KINDS=['Before photo','After photo','Progress photo','Consent form (scan)','Old record (scan)','Other'];
+function aesMhExtra(p){const mh=p.mh;
+  return `<div class="grid2">
+    <label class="f"><span>Skin type (Fitzpatrick)</span><select data-mhf="fitz" id="mh-fitz">${FITZ.map(o=>`<option value="${esc(o)}" ${mh.fitz===o?'selected':''}>${o||'—'}</option>`).join('')}</select></label>
+    <label class="f"><span>Main concern(s)</span><input type="text" data-mhf="concern" id="mh-concern" placeholder="e.g. pigmentation, acne scars, hair fall, wrinkles" value="${esc(mh.concern||'')}"></label>
+    <label class="f"><span>Skin care used now</span><input type="text" data-mhf="skincare" id="mh-skincare" placeholder="e.g. retinol, sunscreen, whitening cream" value="${esc(mh.skincare||'')}"></label>
+    <label class="f"><span>Hair loss pattern (for hair patients)</span><input type="text" data-mhf="hairloss" id="mh-hairloss" placeholder="e.g. Norwood 4, Ludwig II, since 3 years" value="${esc(mh.hairloss||'')}"></label>
+  </div>`}
+function alertsOf(p){const a=[];const ans=p.mh.answers;const K=isAes(p)?AES_ALERT_KEYS:ALERT_KEYS;for(const k in K){if(ans[k]&&ans[k].v==='y')a.push(K[k]);}return a}
 function mhStatus(p){
   if(!p.mh.date)return {cls:'warn',t:'No medical history'};
   if((Date.now()-new Date(p.mh.date))/864e5>365)return {cls:'warn',t:'MH over 12 months old'};
@@ -1011,8 +1132,8 @@ function mhStatus(p){
 /* ---------- screens ---------- */
 function render(){
   const app=$('#app');const s=view.screen;
-  const v={config:configView,offline:offlineView,loading:loadingView,error:errorView,auth:authView,newpw:newpwView,onboard:onboardView,recovery:recoveryView,welcome:welcomeView,list:listView,appts:apptsView,msgs:msgsView,settings:settingsView,patient:patientView,earn:earningsView,owner:ownerView}[s]||loadingView;
-  const inShell=['list','appts','msgs','settings','patient','earn'].includes(s)&&clinic&&me;
+  const v={config:configView,offline:offlineView,loading:loadingView,error:errorView,auth:authView,newpw:newpwView,onboard:onboardView,recovery:recoveryView,welcome:welcomeView,list:listView,appts:apptsView,msgs:msgsView,settings:settingsView,patient:patientView,earn:earningsView,owner:ownerView,aes:aesView}[s]||loadingView;
+  const inShell=['list','appts','msgs','settings','patient','earn','aes'].includes(s)&&clinic&&me;
   app.innerHTML=inShell?shell(ownerBar()+v()):`<div class="wrap">${v()}${['auth','onboard','newpw','recovery','config'].includes(s)?CREDIT:''}${s==='auth'?'<p class="ownerlink"><button class="linkbtn" data-act="ownerOpen">Owner access</button></p>':''}</div>`;
   if(view.screen==='msgs'){const cl=document.getElementById('chatList');if(cl)cl.scrollTop=cl.scrollHeight}
   if(document.querySelector('.credit-qr'))fillQR();
@@ -1030,13 +1151,19 @@ function fillQR(){
   if(!qrLib)qrLib=new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)});
   qrLib.then(draw,()=>boxes.forEach(b=>b.remove()));
 }
-/* ---- Clinic earnings (admin only, password protected) ---- */
-let earn={pays:null,loading:false,err:'',unlockedAt:0,period:'month',anchor:null,busy:false,mode:'',tries:0};
+/* ---- Clinic earnings, expenses and salaries (admin only, PIN protected) ---- */
+let earn={pays:null,loading:false,err:'',unlockedAt:0,period:'month',anchor:null,busy:false,mode:'',tries:0,tab:'overview',dentist:'',printWhat:'all',sec:'all'};
+let fin={rows:null};
 const EARN_LOCK_MIN=10;
 const earnOpen=()=>isAdmin()&&earn.unlockedAt&&Date.now()-earn.unlockedAt<EARN_LOCK_MIN*60e3;
 const isoD=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*6e4);return x.toISOString().slice(0,10)};
 const parseD=s=>{const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const EXP_CATS=['Materials','Lab charges','Rent','Electricity, gas & water','Equipment & repairs','Marketing','Other'];
+const LAB_WORK=['Crown','Bridge','Complete denture','Partial denture (acrylic)','Partial denture (cobalt chrome)','Implant crown / abutment','Veneer','Inlay / onlay','Post & core','Temporary crown','Night guard','Orthodontic appliance / retainer','Denture repair','Other lab work'];
+const STAFF_ROLES=['Dentist','Manager','Assistant','Receptionist','Marketing','Hygienist','Cleaner','Other'];
 function earnRange(period,anchor){
+  if(period==='all')return ['0000-01-01','9999-12-31'];
   const a=parseD(anchor);let f,t;
   if(period==='day'){f=t=a}
   else if(period==='week'){const wd=(a.getDay()+6)%7;f=new Date(a);f.setDate(a.getDate()-wd);t=new Date(f);t.setDate(f.getDate()+6)}
@@ -1051,8 +1178,7 @@ function earnShift(dir){
   else if(earn.period==='month'){a.setDate(1);a.setMonth(a.getMonth()+dir)}else a.setFullYear(a.getFullYear()+dir);
   earn.anchor=isoD(a);
 }
-const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function earnTitle(f,t){const F=parseD(f),T=parseD(t);
+function earnTitle(f,t){if(earn.period==='all')return 'All time';const F=parseD(f),T=parseD(t);
   if(earn.period==='day')return F.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   if(earn.period==='week')return `${F.getDate()} ${MONTHS[F.getMonth()]} – ${T.getDate()} ${MONTHS[T.getMonth()]} ${T.getFullYear()}`;
   if(earn.period==='month')return F.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
@@ -1060,76 +1186,221 @@ function earnTitle(f,t){const F=parseD(f),T=parseD(t);
 }
 async function loadEarn(){
   earn.loading=true;earn.err='';softRender();
-  try{const {data,error}=await sb.from('payments').select('*').eq('clinic_id',clinic.id);if(error)throw error;earn.pays=data||[]}
+  try{const [a,b]=await Promise.all([sb.from('payments').select('*').eq('clinic_id',clinic.id),sb.from('finance').select('*').eq('clinic_id',clinic.id)]);
+    if(a.error)throw a.error;earn.pays=a.data||[];
+    if(b.error){fin.rows=[];earn.finErr=/finance/i.test(b.error.message||'')||/relation|does not exist|schema cache/i.test(b.error.message||'')?'needsql':friendly(b.error)}else{fin.rows=b.data||[];earn.finErr=''}}
   catch(e){earn.err=friendly(e)}
   earn.loading=false;softRender();
 }
+const finOf=k=>(fin.rows||[]).filter(r=>r.kind===k);
+async function finSave(kind,data,id){
+  if(id){const {error}=await sb.from('finance').update({data}).eq('id',id);if(error)throw error;const r=(fin.rows||[]).find(x=>x.id===id);if(r)r.data=data}
+  else{const row={clinic_id:clinic.id,kind,data};const {data:out,error}=await sb.from('finance').insert(row).select();if(error)throw error;(fin.rows=fin.rows||[]).push(Array.isArray(out)?out[0]:out)}
+}
+async function finDel(id){const {error}=await sb.from('finance').delete().eq('id',id);if(error)throw error;fin.rows=(fin.rows||[]).filter(r=>r.id!==id)}
 const patName=id=>{const p=db.patients.find(x=>x.id===id);return p?((p.first||'')+' '+(p.last||'')).trim()||'Unnamed':'(deleted patient)'};
+const procGroup=p=>(p||'Other').split(' – ')[0];
+/* dentists: team members who treat + names found on completed treatments + staff saved as Dentist */
+function dentistNames(){
+  const s=new Set();team.filter(t=>t.role!=='accountant').forEach(t=>t.name&&s.add(t.name));
+  finOf('staff').filter(r=>r.data.role==='Dentist'&&r.data.active!==false).forEach(r=>r.data.name&&s.add(r.data.name));
+  db.patients.forEach(p=>(p.plan||[]).forEach(i=>{if(i.status==='completed'&&i.doneBy)s.add(i.doneBy)}));
+  return [...s].sort();
+}
+const staffFor=name=>finOf('staff').find(r=>r.data.role==='Dentist'&&r.data.name===name);
+const secOk=p=>earn.sec==='aes'?isAes(p):earn.sec==='dental'?!isAes(p):true;
+function doneIn(f,t,who){const out=[];db.patients.filter(secOk).forEach(p=>(p.plan||[]).forEach(i=>{if(i.status==='completed'&&i.doneDate&&i.doneDate>=f&&i.doneDate<=t&&!/^Previous balance/.test(i.proc||'')&&(!who||i.doneBy===who))out.push({p,i})}));return out}
+function payDue(st,month){/* what a staff member earns for a month: fixed salary or % of treatment they did */
+  const d=st.data;if(d.pay==='percent'){const f=month+'-01',t=isoD(new Date(+month.slice(0,4),+month.slice(5,7),0));const v=doneIn(f,t,d.name).reduce((a,x)=>a+(+x.i.fee||0),0);return Math.round(v*(+d.percent||0)/100)}
+  return Math.round(+d.salary||0);
+}
 function earnData(){
   const [f,t]=earnRange(earn.period,earn.anchor||today());const inR=d=>d&&d>=f&&d<=t;
-  const pays=(earn.pays||[]).filter(x=>inR(String(x.paid_on).slice(0,10))).sort((a,b)=>(b.paid_on+b.created_at).localeCompare(a.paid_on+a.created_at));
+  const pk={};db.patients.forEach(p=>pk[p.id]=p);const paySec=x=>earn.sec==='all'||secOk(pk[x.patient_id]||{});
+  const pays=(earn.pays||[]).filter(x=>paySec(x)&&inR(String(x.paid_on).slice(0,10))).sort((a,b)=>(b.paid_on+b.created_at).localeCompare(a.paid_on+a.created_at));
   const received=pays.reduce((a,x)=>a+(+x.amount||0),0),disc=pays.reduce((a,x)=>a+(+x.discount||0),0);
   const byMethod={},byStaff={};pays.forEach(x=>{const m=x.method||'Other';byMethod[m]=(byMethod[m]||0)+(+x.amount||0);const s=x.received_by_name||'Not recorded';byStaff[s]=(byStaff[s]||0)+(+x.amount||0)});
-  const done=[];db.patients.forEach(p=>(p.plan||[]).forEach(i=>{if(i.status==='completed'&&inR(i.doneDate)&&!/^Previous balance/.test(i.proc||''))done.push({p,i})}));
-  const treatVal=done.reduce((a,x)=>a+(+x.i.fee||0),0);
-  const byProc={},byDent={};done.forEach(({i})=>{const k=(i.proc||'Other').split(' – ')[0];const o=byProc[k]||(byProc[k]={n:0,v:0});o.n++;o.v+=+i.fee||0;const d=i.doneBy||'Not recorded';byDent[d]=(byDent[d]||0)+(+i.fee||0)});
-  // bars
+  const done=doneIn(f,t);const treatVal=done.reduce((a,x)=>a+(+x.i.fee||0),0);
+  const byProc={},byDent={};done.forEach(({i})=>{const k=procGroup(i.proc);const o=byProc[k]||(byProc[k]={n:0,v:0});o.n++;o.v+=+i.fee||0;const d=i.doneBy||'Not recorded';const q=byDent[d]||(byDent[d]={n:0,v:0});q.n++;q.v+=+i.fee||0});
+  const exps=finOf('expense').filter(r=>inR(r.data.date)).sort((a,b)=>String(b.data.date).localeCompare(String(a.data.date)));
+  const expTotal=exps.reduce((a,r)=>a+(+r.data.amount||0),0);const byCat={};exps.forEach(r=>{const k=r.data.cat||'Other';byCat[k]=(byCat[k]||0)+(+r.data.amount||0)});
+  const sals=finOf('salary').filter(r=>r.data.status==='paid'&&inR(r.data.paid_on));const salPaid=sals.reduce((a,r)=>a+(+r.data.amount||0),0);
   let bars=[];
   if(earn.period==='week'||earn.period==='month'){const F=parseD(f),T=parseD(t);for(let d=new Date(F);d<=T;d.setDate(d.getDate()+1)){const k=isoD(d);bars.push({k,l:earn.period==='week'?d.toLocaleDateString('en-GB',{weekday:'short'}):String(d.getDate()),v:0})}
     const idx=Object.fromEntries(bars.map((b,i)=>[b.k,i]));pays.forEach(x=>{const i=idx[String(x.paid_on).slice(0,10)];if(i!==undefined)bars[i].v+=+x.amount||0})}
   else if(earn.period==='year'){bars=MONTHS.map((l,i)=>({k:i,l,v:0}));pays.forEach(x=>{bars[+String(x.paid_on).slice(5,7)-1].v+=+x.amount||0})}
-  // all-time money still owed by patients
+  else if(earn.period==='all'){const ys={};pays.forEach(x=>{const y=String(x.paid_on).slice(0,4);ys[y]=(ys[y]||0)+(+x.amount||0)});bars=Object.keys(ys).sort().map(y=>({k:y,l:y,v:ys[y]}))}
   const allPaid={};(earn.pays||[]).forEach(x=>{allPaid[x.patient_id]=(allPaid[x.patient_id]||0)+(+x.amount||0)+(+x.discount||0)});
-  let owed=0;db.patients.forEach(p=>{const ch=(p.plan||[]).filter(i=>i.status==='completed').reduce((a,i)=>a+(+i.fee||0),0);const b=ch-(allPaid[p.id]||0);if(b>0)owed+=b});
-  return {f,t,pays,received,disc,byMethod,byStaff,done,treatVal,byProc,byDent,bars,owed,patients:new Set(pays.map(x=>x.patient_id)).size};
+  let owed=0;db.patients.filter(secOk).forEach(p=>{const ch=(p.plan||[]).filter(i=>i.status==='completed').reduce((a,i)=>a+(+i.fee||0),0);const b=ch-(allPaid[p.id]||0);if(b>0)owed+=b});
+  return {f,t,pays,received,disc,byMethod,byStaff,done,treatVal,byProc,byDent,bars,owed,exps,expTotal,byCat,sals,salPaid,profit:received-expTotal-salPaid,patients:new Set(pays.map(x=>x.patient_id)).size};
 }
-function earningsView(){
-  if(!isAdmin())return `${homeNav('earn')}<section class="panel"><h2>Clinic earnings</h2><p class="muted">Only the clinic admin can see earnings.</p></section>`;
-  if(!earnOpen())return `${homeNav('earn')}<h1>Earnings</h1>${earnLockView()}`;
-  if(!earn.anchor)earn.anchor=today();
-  if(earn.pays===null||earn.loading)return `${homeNav('earn')}<h1>Earnings</h1><section class="panel"><p class="muted">${earn.err?esc(earn.err):'Loading payments…'}</p></section>`;
-  const D=earnData();const max=Math.max(1,...D.bars.map(b=>b.v));
-  const list=(o,total)=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="erow"><span>${esc(k)}</span><span class="ebar"><i style="width:${total?Math.round(v/total*100):0}%"></i></span><b>${money(v)}</b></div>`).join('')||'<p class="small muted" style="margin:0">Nothing in this period.</p>';
-  return `${homeNav('earn')}
-  <div class="row" style="gap:10px;flex-wrap:wrap"><h1 style="margin:0">Earnings</h1><span class="spacer"></span>
-    <button class="btn small" data-act="earnCsv">Download list (Excel/CSV)</button><button class="btn small" data-act="earnLock">${icon('lock')} Lock</button></div>
-  <section class="panel">
-    <div class="row" style="gap:10px;flex-wrap:wrap">
-      <div class="seg" role="radiogroup" aria-label="Period">${[['day','Daily'],['week','Weekly'],['month','Monthly'],['year','Yearly']].map(([k,l])=>`<button type="button" class="${earn.period===k?'on':''}" data-earnper="${k}" role="radio" aria-checked="${earn.period===k}">${l}</button>`).join('')}</div>
-      <span class="spacer"></span>
-      <div class="row" style="gap:6px"><button class="btn small" data-earnnav="-1" aria-label="Previous">‹</button><b class="eperiod">${esc(earnTitle(D.f,D.t))}</b><button class="btn small" data-earnnav="1" aria-label="Next">›</button><button class="btn small" data-earnnav="0">Today</button></div>
-    </div>
-    <div class="paysum esum">
+const listBars=(o,total)=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="erow"><span>${esc(k)}</span><span class="ebar"><i style="width:${total?Math.round(v/total*100):0}%"></i></span><b>${money(v)}</b></div>`).join('')||'<p class="small muted" style="margin:0">Nothing in this period.</p>';
+function treatTable(byProc,total,count){
+  if(!Object.keys(byProc).length)return '<p class="muted" style="margin:0">No treatment marked as done in this period.</p>';
+  return `<div class="tablewrap"><table class="att etreat"><thead><tr><th>Treatment</th><th style="text-align:right">How many</th><th style="text-align:right">Earned</th><th style="width:30%">Share</th></tr></thead><tbody>
+  ${Object.entries(byProc).sort((a,b)=>b[1].v-a[1].v).map(([k,o])=>`<tr><td>${esc(k)}</td><td style="text-align:right">${o.n}</td><td style="text-align:right"><b>${money(o.v)}</b></td><td><span class="ebar"><i style="width:${total?Math.round(o.v/total*100):0}%"></i></span> <small class="muted">${total?Math.round(o.v/total*100):0}%</small></td></tr>`).join('')}
+  </tbody><tfoot><tr><th>Total – all treatments</th><th style="text-align:right">${count}</th><th style="text-align:right">${money(total)}</th><th></th></tr></tfoot></table></div>`;
+}
+function needSqlNote(){return earn.finErr==='needsql'?`<div class="msg warn">Expenses, salaries and the clinic logo need one small database update. Open <b>Supabase → SQL Editor</b>, paste the file <b>supabase-update-finance.sql</b> and press <b>Run</b>. Then reload this page.</div>`:earn.finErr?`<div class="msg err">${esc(earn.finErr)}</div>`:''}
+function earnOverview(D){
+  const max=Math.max(1,...D.bars.map(b=>b.v));
+  return `<div class="paysum esum">
       <div><span>Money received</span><b>${money(D.received)}</b><small>${D.pays.length} payment${D.pays.length===1?'':'s'} · ${D.patients} patient${D.patients===1?'':'s'}</small></div>
+      <div><span>Expenses</span><b>${money(D.expTotal)}</b><small>materials, lab, rent and more</small></div>
+      <div><span>Salaries paid</span><b>${money(D.salPaid)}</b><small>marked as paid in this period</small></div>
+      <div class="${D.profit<0?'bad':'good'}"><span>Profit</span><b>${D.profit<0?'– ':''}${money(Math.abs(D.profit))}</b><small>received – expenses – salaries</small></div>
       <div><span>Treatment done (value)</span><b>${money(D.treatVal)}</b><small>${D.done.length} treatment${D.done.length===1?'':'s'} completed</small></div>
       <div><span>Discounts given</span><b>${money(D.disc)}</b><small>in this period</small></div>
       <div class="warn"><span>Still owed by patients</span><b>${money(D.owed)}</b><small>all patients, up to now</small></div>
     </div>
-    ${D.bars.length?`<div class="echart" role="img" aria-label="Money received per ${earn.period==='year'?'month':'day'}">${D.bars.map(b=>`<div class="ecol" title="${esc(b.l)}: ${money(b.v)}"><span class="eval">${b.v?money(b.v).replace('Rs ',''):''}</span><i style="height:${Math.round(b.v/max*100)}%"></i><em>${esc(b.l)}</em></div>`).join('')}</div>`:''}
-  </section>
-  <section class="panel"><div class="row"><h3 style="margin:0">Earnings by treatment</h3><span class="spacer"></span><span class="small muted">treatments marked as done in this period</span></div>
-    ${Object.keys(D.byProc).length?`<div class="tablewrap"><table class="att etreat"><thead><tr><th>Treatment</th><th style="text-align:right">How many</th><th style="text-align:right">Earned</th><th style="width:30%">Share</th></tr></thead><tbody>
-    ${Object.entries(D.byProc).sort((a,b)=>b[1].v-a[1].v).map(([k,o])=>`<tr><td>${esc(k)}</td><td style="text-align:right">${o.n}</td><td style="text-align:right"><b>${money(o.v)}</b></td><td><span class="ebar"><i style="width:${D.treatVal?Math.round(o.v/D.treatVal*100):0}%"></i></span> <small class="muted">${D.treatVal?Math.round(o.v/D.treatVal*100):0}%</small></td></tr>`).join('')}
-    </tbody><tfoot><tr><th>Total – all treatments</th><th style="text-align:right">${D.done.length}</th><th style="text-align:right">${money(D.treatVal)}</th><th></th></tr></tfoot></table></div>`:'<p class="muted" style="margin:0">No treatment marked as done in this period.</p>'}
-  </section>
-  <div class="grid2 egrid">
-    <section class="panel"><h3>Received by payment method</h3>${list(D.byMethod,D.received)}</section>
-    <section class="panel"><h3>Received by staff</h3>${list(D.byStaff,D.received)}</section>
-    <section class="panel"><h3>Treatment value by dentist</h3>${list(D.byDent,D.treatVal)}</section>
-  </div>
-  <section class="panel"><h3>Payments in this period</h3>
+    ${D.bars.length?`<div class="echart" role="img" aria-label="Money received per ${earn.period==='year'?'month':earn.period==='all'?'year':'day'}">${D.bars.map(b=>`<div class="ecol" title="${esc(b.l)}: ${money(b.v)}"><span class="eval">${b.v?money(b.v).replace('Rs ',''):''}</span><i style="height:${Math.round(b.v/max*100)}%"></i><em>${esc(b.l)}</em></div>`).join('')}</div>`:''}
+    <div class="grid2 egrid" style="margin-top:14px">
+      <section class="subpanel"><h3>Earnings by treatment</h3>${listBars(Object.fromEntries(Object.entries(D.byProc).map(([k,o])=>[k,o.v])),D.treatVal)}</section>
+      <section class="subpanel"><h3>Expenses by type</h3>${listBars(D.byCat,D.expTotal)}</section>
+    </div>`;
+}
+function earnDentists(D){
+  const names=dentistNames();const sel=earn.dentist&&names.includes(earn.dentist)?earn.dentist:'';
+  const rows=names.map(n=>{const o=D.byDent[n]||{n:0,v:0};const st=staffFor(n);const pay=st?(st.data.pay==='percent'?`${+st.data.percent||0}% of treatment`:`${money(st.data.salary)} / month`):'<span class="muted">not set</span>';
+    const share=st&&st.data.pay==='percent'?money(Math.round(o.v*(+st.data.percent||0)/100)):'–';
+    return `<tr class="${sel===n?'selrow':''}"><td><button class="linkbtn" data-earndent="${esc(n)}">${esc(n)}</button></td><td style="text-align:right">${o.n}</td><td style="text-align:right"><b>${money(o.v)}</b></td><td>${pay}</td><td style="text-align:right">${share}</td></tr>`}).join('');
+  let detail='';
+  if(sel){const mine=D.done.filter(x=>x.i.doneBy===sel);const bp={};mine.forEach(({i})=>{const k=procGroup(i.proc);const o=bp[k]||(bp[k]={n:0,v:0});o.n++;o.v+=+i.fee||0});const tv=mine.reduce((a,x)=>a+(+x.i.fee||0),0);const st=staffFor(sel);
+    detail=`<section class="subpanel"><div class="row"><h3 style="margin:0">${esc(sel)} – ${esc(earnTitle(D.f,D.t))}</h3><span class="spacer"></span><button class="btn small" data-act="printDentist">${icon('doc')} Print PDF</button></div>
+      ${treatTable(bp,tv,mine.length)}
+      ${mine.length?`<details style="margin-top:8px"><summary class="small">Show every treatment (${mine.length})</summary><div class="tablewrap"><table class="att"><thead><tr><th>Date</th><th>Patient</th><th>Tooth</th><th>Treatment</th><th style="text-align:right">Fee</th></tr></thead><tbody>${mine.sort((a,b)=>String(b.i.doneDate).localeCompare(String(a.i.doneDate))).map(({p,i})=>`<tr><td>${fmtDate(i.doneDate)}</td><td>${esc((p.first+' '+p.last).trim())}</td><td>${esc(i.tooth||'–')}</td><td>${esc(i.proc)}</td><td style="text-align:right">${money(i.fee)}</td></tr>`).join('')}</tbody></table></div></details>`:''}
+      <form id="dentPayForm" class="payset"><b>Pay for ${esc(sel)}</b>
+        <div class="seg" role="radiogroup"><label><input type="radio" name="dp-type" value="fixed" ${!st||st.data.pay!=='percent'?'checked':''}> Fixed monthly salary</label><label><input type="radio" name="dp-type" value="percent" ${st&&st.data.pay==='percent'?'checked':''}> Percentage of treatment</label></div>
+        <div class="row" style="gap:8px;flex-wrap:wrap"><label class="f" style="max-width:180px"><span>Monthly salary (Rs)</span><input type="number" id="dp-salary" min="0" step="1" inputmode="numeric" value="${st?esc(st.data.salary||''):''}"></label>
+        <label class="f" style="max-width:140px"><span>Percentage (%)</span><input type="number" id="dp-pct" min="0" max="100" step="0.5" inputmode="decimal" value="${st?esc(st.data.percent||''):''}"></label>
+        <button class="btn primary small" type="submit" style="align-self:flex-end">Save pay</button></div>
+        ${st&&st.data.pay==='percent'?`<p class="small" style="margin:0">Earned share in this period: <b>${money(Math.round(tv*(+st.data.percent||0)/100))}</b> (${+st.data.percent||0}% of ${money(tv)})</p>`:''}
+      </form></section>`}
+  return `<p class="small muted" style="margin:0 0 8px">Treatments are counted for the dentist who marked them as done. Tap a name to see details and set pay.</p>
+    ${names.length?`<div class="tablewrap"><table class="att"><thead><tr><th>Dentist</th><th style="text-align:right">Treatments</th><th style="text-align:right">Value</th><th>Pay</th><th style="text-align:right">% share</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="muted">No dentists yet.</p>'}
+    ${detail}`;
+}
+function earnExpenses(D){
+  const f=earn.expForm||{};const cat=f.cat||'Materials';
+  return `<form id="expForm" class="subpanel expform"><h3 style="margin:0">Add an expense</h3>
+      <div class="grid3">
+        <label class="f"><span>Date</span><input type="date" id="ex-date" value="${esc(f.date||today())}" max="${today()}"></label>
+        <label class="f"><span>Type</span><select id="ex-cat">${EXP_CATS.map(c=>`<option ${c===cat?'selected':''}>${c}</option>`).join('')}</select></label>
+        ${cat==='Lab charges'?`<label class="f"><span>Lab work</span><select id="ex-lab">${LAB_WORK.map(c=>`<option ${c===f.lab?'selected':''}>${c}</option>`).join('')}</select></label>`:''}
+        <label class="f"><span>${cat==='Materials'?'Material name':cat==='Lab charges'?'Lab name (optional)':'What for'}</span><input type="text" id="ex-item" value="${esc(f.item||'')}" placeholder="${cat==='Materials'?'e.g. Composite kit, gloves, anaesthetic':cat==='Lab charges'?'e.g. City Dental Lab':''}"></label>
+        ${cat==='Lab charges'?`<label class="f"><span>Patient (optional)</span><input type="text" id="ex-pat" value="${esc(f.pat||'')}" list="ex-pats"><datalist id="ex-pats">${db.patients.slice(0,300).map(p=>`<option value="${esc((p.first+' '+p.last).trim())}">`).join('')}</datalist></label>`:''}
+        <label class="f"><span>Amount (Rs)</span><input type="number" id="ex-amt" min="0" step="1" inputmode="numeric" value="${esc(f.amount||'')}" required></label>
+      </div>
+      <label class="f"><span>Note (optional)</span><input type="text" id="ex-note" value="${esc(f.note||'')}"></label>
+      <div class="row"><button class="btn primary" type="submit">Save expense</button></div>
+    </form>
+    <section class="subpanel"><div class="row"><h3 style="margin:0">Expenses – ${esc(earnTitle(D.f,D.t))}</h3><span class="spacer"></span><b>${money(D.expTotal)}</b></div>
+      ${D.exps.length?`<div class="tablewrap"><table class="att"><thead><tr><th>Date</th><th>Type</th><th>Item</th><th style="text-align:right">Amount</th><th></th></tr></thead><tbody>
+      ${D.exps.map(r=>{const d=r.data;return `<tr><td>${fmtDate(d.date)}</td><td>${esc(d.cat||'')}${d.lab?`<br><small class="muted">${esc(d.lab)}</small>`:''}</td><td>${esc(d.item||'')}${d.pat?` <small class="muted">· ${esc(d.pat)}</small>`:''}${d.note?`<br><small class="muted">${esc(d.note)}</small>`:''}</td><td style="text-align:right">${money(d.amount)}</td><td>${view.confirm==='expdel:'+r.id?`<button class="btn small danger" data-expdel="${r.id}">Delete</button>`:`<button class="btn small" data-askexpdel="${r.id}" aria-label="Delete expense">✕</button>`}</td></tr>`}).join('')}
+      </tbody></table></div><h3 style="margin:12px 0 6px">By type</h3>${listBars(D.byCat,D.expTotal)}`:'<p class="muted" style="margin:0">No expenses in this period.</p>'}
+    </section>`;
+}
+function earnStaff(D){
+  const month=(earn.anchor||today()).slice(0,7);const mLabel=parseD(month+'-01').toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+  const staff=finOf('staff').filter(r=>r.data.active!==false).sort((a,b)=>STAFF_ROLES.indexOf(a.data.role)-STAFF_ROLES.indexOf(b.data.role)||String(a.data.name).localeCompare(String(b.data.name)));
+  const sal=id=>finOf('salary').find(r=>r.data.staff_id===id&&r.data.month===month);
+  let dueT=0,paidT=0;
+  const rows=staff.map(r=>{const d=r.data,due=payDue(r,month),s=sal(r.id),paid=s&&s.data.status==='paid';if(paid)paidT+=+s.data.amount||0;else dueT+=due;
+    return `<tr><td><b>${esc(d.name)}</b><br><small class="muted">${esc(d.role)}${d.role==='Other'&&d.roleName?' – '+esc(d.roleName):''}</small></td>
+      <td>${d.pay==='percent'?`${+d.percent||0}% of treatment`:`${money(d.salary)} / month`}</td>
+      <td style="text-align:right">${money(paid?s.data.amount:due)}</td>
+      <td>${paid?`<span class="pill ok">Paid ${s.data.paid_on?fmtDate(s.data.paid_on):''}</span>`:'<span class="pill warn">Unpaid</span>'}</td>
+      <td><div class="row" style="flex-wrap:nowrap;gap:4px">${paid?`<button class="btn small" data-salunpaid="${r.id}">Mark unpaid</button>`:`<button class="btn small primary" data-salpaid="${r.id}" data-amt="${due}">Mark paid</button>`}<button class="btn small" data-staffedit="${r.id}">Edit</button></div></td></tr>`}).join('');
+  const e=earn.staffEdit?finOf('staff').find(r=>r.id===earn.staffEdit):null;const ed=e?e.data:(earn.staffNew?{role:'Assistant',pay:'fixed'}:null);
+  return `<div class="row" style="gap:8px;flex-wrap:wrap"><p class="small muted" style="margin:0">Salaries for <b>${esc(mLabel)}</b> (change the month with ‹ › above, in Monthly view).</p><span class="spacer"></span><button class="btn small primary" data-act="staffNew">+ Add staff</button></div>
+    ${ed?`<form id="staffForm" class="subpanel"><h3 style="margin:0">${e?'Edit '+esc(ed.name):'Add staff member'}</h3>
+      <div class="grid3">
+        <label class="f"><span>Name</span><input type="text" id="sf-name" value="${esc(ed.name||'')}" required list="sf-team"><datalist id="sf-team">${team.map(t=>`<option value="${esc(t.name)}">`).join('')}</datalist></label>
+        <label class="f"><span>Job</span><select id="sf-role">${STAFF_ROLES.map(r=>`<option ${r===ed.role?'selected':''}>${r}</option>`).join('')}</select></label>
+        <label class="f"><span>If "Other": job name</span><input type="text" id="sf-rolename" value="${esc(ed.roleName||'')}"></label>
+        <label class="f"><span>Pay type</span><select id="sf-pay"><option value="fixed" ${ed.pay!=='percent'?'selected':''}>Fixed monthly salary</option><option value="percent" ${ed.pay==='percent'?'selected':''}>Percentage of own treatment (dentists)</option></select></label>
+        <label class="f"><span>Monthly salary (Rs)</span><input type="number" id="sf-salary" min="0" step="1" inputmode="numeric" value="${esc(ed.salary||'')}"></label>
+        <label class="f"><span>Percentage (%)</span><input type="number" id="sf-pct" min="0" max="100" step="0.5" inputmode="decimal" value="${esc(ed.percent||'')}"></label>
+      </div>
+      <div class="row"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-act="staffCancel">Cancel</button><span class="spacer"></span>${e?`<button class="btn danger small" type="button" data-staffremove="${e.id}">Remove from staff</button>`:''}</div>
+    </form>`:''}
+    ${staff.length?`<div class="tablewrap"><table class="att"><thead><tr><th>Staff</th><th>Pay</th><th style="text-align:right">${esc(MONTHS[+month.slice(5,7)-1])} salary</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody>
+      <tfoot><tr><th colspan="2">Total paid / still unpaid</th><th style="text-align:right">${money(paidT)} / ${money(dueT)}</th><th colspan="2"></th></tr></tfoot></table></div>`
+      :'<p class="muted">No staff added yet. Add dentists, manager, assistants, marketing and others with their salary.</p>'}`;
+}
+function earnPayments(D){
+  return `<div class="grid2 egrid"><section class="subpanel"><h3>Received by payment method</h3>${listBars(D.byMethod,D.received)}</section><section class="subpanel"><h3>Received by staff</h3>${listBars(D.byStaff,D.received)}</section></div>
+  <section class="subpanel"><h3>Payments in this period</h3>
     ${D.pays.length?`<div class="tablewrap"><table class="att"><thead><tr><th>Date</th><th>Patient</th><th>Method</th><th style="text-align:right">Amount</th><th style="text-align:right">Discount</th><th>Received by</th></tr></thead><tbody>
     ${D.pays.slice(0,300).map(x=>`<tr><td>${fmtDate(x.paid_on)}</td><td><button class="linkbtn" data-open="${x.patient_id}">${esc(patName(x.patient_id))}</button></td><td>${esc(x.method||'')}${x.reference?` <small class="muted">${esc(x.reference)}</small>`:''}</td><td style="text-align:right">${money(x.amount)}</td><td style="text-align:right">${+x.discount?money(x.discount):'–'}</td><td>${esc(x.received_by_name||'')}</td></tr>`).join('')}
     </tbody></table></div>${D.pays.length>300?'<p class="small muted">Showing the latest 300. Download the list for all.</p>':''}`:'<p class="muted" style="margin:0">No payments in this period.</p>'}
   </section>`;
 }
+const readExpForm=()=>{const g=id=>{const x=$('#'+id);return x?x.value:''};return {date:g('ex-date'),cat:g('ex-cat'),lab:g('ex-lab'),item:g('ex-item').trim(),pat:g('ex-pat').trim(),amount:g('ex-amt'),note:g('ex-note').trim()}};
+function earningsView(){
+  if(!isAdmin())return `${homeNav('earn')}<section class="panel"><h2>Clinic earnings</h2><p class="muted">Only the clinic admin can see earnings.</p></section>`;
+  if(!earnOpen())return `${homeNav('earn')}<h1>Earnings</h1>${earnLockView()}`;
+  if(!earn.anchor)earn.anchor=today();
+  if(earn.pays===null||earn.loading)return `${homeNav('earn')}<h1>Earnings</h1><section class="panel"><p class="muted">${earn.err?esc(earn.err):'Loading…'}</p></section>`;
+  const D=earnData();
+  const tabs=[['overview','Overview'],['treat','By treatment'],['dentists','Dentists'],['expenses','Expenses'],['staff','Staff & salaries'],['payments','Payments']];
+  const body={overview:earnOverview,treat:D=>treatTable(D.byProc,D.treatVal,D.done.length),dentists:earnDentists,expenses:earnExpenses,staff:earnStaff,payments:earnPayments}[earn.tab]||earnOverview;
+  return `${homeNav('earn')}
+  <div class="row" style="gap:10px;flex-wrap:wrap"><h1 style="margin:0">Earnings</h1><span class="spacer"></span>
+    <label class="row small" style="gap:6px">Print <select id="earn-print" style="width:auto">${[['all','Whole report'],['treat','Treatments only'],['dentists','Dentists only'],['expenses','Expenses & salaries'],['payments','Payments list']].map(([k,l])=>`<option value="${k}" ${earn.printWhat===k?'selected':''}>${l}</option>`).join('')}</select></label>
+    <button class="btn small primary" data-act="earnPdf">${icon('doc')} PDF</button>
+    <button class="btn small" data-act="earnCsv">Excel/CSV</button><button class="btn small" data-act="earnLock">${icon('lock')} Lock</button></div>
+  ${needSqlNote()}
+  <section class="panel">
+    <div class="row" style="gap:10px;flex-wrap:wrap">
+      <div class="seg" role="radiogroup" aria-label="Period">${[['day','Daily'],['week','Weekly'],['month','Monthly'],['year','Yearly'],['all','All time']].map(([k,l])=>`<button type="button" class="${earn.period===k?'on':''}" data-earnper="${k}" role="radio" aria-checked="${earn.period===k}">${l}</button>`).join('')}</div>
+      <div class="seg" role="radiogroup" aria-label="Section">${[['all','Whole clinic'],['dental','Dental'],['aes','Aesthetics']].map(([k,l])=>`<button type="button" class="${earn.sec===k?'on':''}" data-earnsec="${k}" role="radio" aria-checked="${earn.sec===k}">${l}</button>`).join('')}</div>
+      <span class="spacer"></span>
+      ${earn.period==='all'?`<b class="eperiod">All time</b>`:`<div class="row" style="gap:6px"><button class="btn small" data-earnnav="-1" aria-label="Previous">‹</button><b class="eperiod">${esc(earnTitle(D.f,D.t))}</b><button class="btn small" data-earnnav="1" aria-label="Next">›</button><button class="btn small" data-earnnav="0">Today</button></div>`}
+    </div>
+    <nav class="tabs etabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab" role="tab" aria-selected="${earn.tab===k}" data-earntab="${k}">${l}</button>`).join('')}</nav>
+    <div class="ebody">${body(D)}</div>
+  </section>`;
+}
 function earnCsv(){
   const D=earnData();const q=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
-  const rows=[['Date','Patient','Method','Reference','Amount (Rs)','Discount (Rs)','Received by','Note'].map(q).join(',')]
-    .concat(D.pays.map(x=>[fmtDate(x.paid_on),patName(x.patient_id),x.method,x.reference,+x.amount||0,+x.discount||0,x.received_by_name,x.note].map(q).join(',')));
-  rows.push('',[q('Total received'),'','','',D.received,D.disc].join(','));
+  const rows=[[q('Clinic'),q(clinic.name)].join(','),[q('Period'),q(earnTitle(D.f,D.t))].join(','),'',
+    ['Summary','Rs'].map(q).join(','),...[['Money received',D.received],['Treatment value',D.treatVal],['Discounts',D.disc],['Expenses',D.expTotal],['Salaries paid',D.salPaid],['Profit',D.profit],['Still owed by patients',D.owed]].map(r=>[q(r[0]),r[1]].join(',')),'',
+    ['Treatment','How many','Earned (Rs)'].map(q).join(','),...Object.entries(D.byProc).sort((a,b)=>b[1].v-a[1].v).map(([k,o])=>[q(k),o.n,o.v].join(',')),'',
+    ['Dentist','Treatments','Value (Rs)'].map(q).join(','),...Object.entries(D.byDent).map(([k,o])=>[q(k),o.n,o.v].join(',')),'',
+    ['Expense date','Type','Item','Amount (Rs)','Note'].map(q).join(','),...D.exps.map(r=>[q(fmtDate(r.data.date)),q(r.data.cat+(r.data.lab?' – '+r.data.lab:'')),q(r.data.item+(r.data.pat?' · '+r.data.pat:'')),+r.data.amount||0,q(r.data.note)].join(',')),'',
+    ['Payment date','Patient','Method','Reference','Amount (Rs)','Discount (Rs)','Received by','Note'].map(q).join(','),
+    ...D.pays.map(x=>[fmtDate(x.paid_on),patName(x.patient_id),x.method,x.reference,+x.amount||0,+x.discount||0,x.received_by_name,x.note].map(q).join(','))];
   const blob=new Blob(['﻿'+rows.join('\r\n')],{type:'text/csv'});
-  deliverFile(blob,('Earnings_'+clinic.name+'_'+D.f+'_to_'+D.t+'.csv').replace(/[^\w.\-]+/g,'_'),'save');
+  deliverFile(blob,('Earnings_'+clinic.name+'_'+(earn.period==='all'?'all_time':D.f+'_to_'+D.t)+'.csv').replace(/[^\w.\-]+/g,'_'),'save');
+}
+/* PDF report: whole, treatments, dentists, expenses & salaries, payments – or one dentist */
+async function earnPdf(what,dentist){
+  if(!window.jspdf){toast('The PDF tool did not load. Check your internet and reload the page.');return}
+  const D=earnData();const P=pdfBase(dentist?'Dentist report':'Clinic report');const {doc,W,M,st,C}=P;
+  P.kv('Period',earnTitle(D.f,D.t)+(earn.sec==='all'?'':' · '+(earn.sec==='aes'?'Aesthetics':'Dental')),M,90);P.kv('Printed',fmtDate(today())+' by '+me.name,M+95,80);st.y+=13;
+  const R=[W-M];const two=(l,v,b)=>P.row([l,v],[M,W-M],{right:[1],bold:b,w:[140,50]});
+  const tTable=(bp,total,count)=>{const xs=[M,W-M-45,W-M];P.row(['Treatment','How many','Earned'],xs,{bold:true,size:8.5,color:C.MUT,right:[1,2],w:[120,25,40]});
+    Object.entries(bp).sort((a,b)=>b[1].v-a[1].v).forEach(([k,o])=>P.row([k,String(o.n),money(o.v)],xs,{right:[1,2],w:[120,25,40]}));
+    doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);P.row(['Total – all treatments',String(count),money(total)],xs,{right:[1,2],bold:true,w:[120,25,40]})};
+  if(dentist){const mine=D.done.filter(x=>x.i.doneBy===dentist);const bp={};mine.forEach(({i})=>{const k=procGroup(i.proc);const o=bp[k]||(bp[k]={n:0,v:0});o.n++;o.v+=+i.fee||0});const tv=mine.reduce((a,x)=>a+(+x.i.fee||0),0);
+    P.kv('Dentist',dentist,M,120);st.y+=13;P.sec('Treatments done');if(mine.length)tTable(bp,tv,mine.length);else P.row(['No treatment in this period.'],[M],{color:C.MUT});
+    const stf=staffFor(dentist);if(stf){P.sec('Pay');two('Pay type',stf.data.pay==='percent'?(+stf.data.percent||0)+'% of treatment':money(stf.data.salary)+' per month');if(stf.data.pay==='percent')two('Share for this period',money(Math.round(tv*(+stf.data.percent||0)/100)),true)}
+    if(mine.length){P.sec('Every treatment');const xs=[M,M+24,M+80,M+96,W-M];mine.sort((a,b)=>String(a.i.doneDate).localeCompare(String(b.i.doneDate))).forEach(({p,i})=>P.row([fmtDate(i.doneDate),(p.first+' '+p.last).trim(),i.tooth||'–',i.proc,money(i.fee)],xs,{right:[4],w:[22,54,14,70,30],size:8.5}))}
+  }else{
+    if(what==='all'){P.sec('Summary');two('Money received',money(D.received));two('Expenses',money(D.expTotal));two('Salaries paid',money(D.salPaid));two('Profit',(D.profit<0?'- ':'')+money(Math.abs(D.profit)),true);two('Treatment done (value)',money(D.treatVal));two('Discounts given',money(D.disc));two('Still owed by patients (up to now)',money(D.owed))}
+    if(what==='all'||what==='treat'){P.sec('Earnings by treatment');if(D.done.length)tTable(D.byProc,D.treatVal,D.done.length);else P.row(['No treatment in this period.'],[M],{color:C.MUT})}
+    if(what==='all'||what==='dentists'){P.sec('Treatment value by dentist');const xs=[M,W-M-45,W-M];P.row(['Dentist','Treatments','Value'],xs,{bold:true,size:8.5,color:C.MUT,right:[1,2],w:[120,25,40]});
+      Object.entries(D.byDent).sort((a,b)=>b[1].v-a[1].v).forEach(([k,o])=>{const s=staffFor(k);P.row([k+(s&&s.data.pay==='percent'?'  ('+(+s.data.percent||0)+'% = '+money(Math.round(o.v*(+s.data.percent||0)/100))+')':''),String(o.n),money(o.v)],xs,{right:[1,2],w:[120,25,40]})})}
+    if(what==='all'||what==='expenses'){P.sec('Expenses');if(D.exps.length){const xs=[M,M+24,M+70,W-M];D.exps.slice().reverse().forEach(r=>{const d=r.data;P.row([fmtDate(d.date),d.cat+(d.lab?' – '+d.lab:''),(d.item||'')+(d.pat?' · '+d.pat:''),money(d.amount)],xs,{right:[3],w:[22,46,90,30],size:8.5})});
+        doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);two('Total expenses',money(D.expTotal),true);Object.entries(D.byCat).forEach(([k,v])=>two('   '+k,money(v)))}else P.row(['No expenses in this period.'],[M],{color:C.MUT});
+      P.sec('Salaries paid');if(D.sals.length){D.sals.forEach(r=>{const s=finOf('staff').find(x=>x.id===r.data.staff_id);two((s?s.data.name+' ('+s.data.role+')':'Staff')+' – '+r.data.month+(r.data.paid_on?', paid '+fmtDate(r.data.paid_on):''),money(r.data.amount))});two('Total salaries paid',money(D.salPaid),true)}else P.row(['No salaries marked as paid in this period.'],[M],{color:C.MUT})}
+    if(what==='all'||what==='payments'){P.sec('Payments received');const xs=[M,M+24,M+82,M+125,W-M];D.pays.slice().reverse().forEach(x=>P.row([fmtDate(x.paid_on),patName(x.patient_id),x.method||'',x.received_by_name||'',money(x.amount)],xs,{right:[4],w:[22,56,42,40,30],size:8.5}));
+      doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);two('Total received',money(D.received),true)}
+  }
+  const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(7.5);doc.setTextColor(...C.MUT);doc.text(P.clean(clinic.name)+' – confidential financial report',M,290);doc.text('Page '+i+' of '+pages,W-M,290,{align:'right'})}
+  const fn=((dentist?'Dentist_'+dentist:'Clinic_report_'+what)+'_'+(earn.period==='all'?'all_time':D.f+'_to_'+D.t)+'.pdf').replace(/[^\w.\-]+/g,'_');
+  await deliverFile(doc.output('blob'),fn,'save');
 }
 /* Earnings PIN: 4–6 digits, kept (hashed) on the admin's own account, set with the login password. */
 async function pinHash(pin,salt){
@@ -1207,15 +1478,16 @@ async function ownerAutoLogin(){
   const np=sample();np.notes[0].by=me.name;db.patients.push(np);markDirty(np.id);await flush();render();
 }
 function shell(content){
-  const s=view.screen,active=s==='appts'?'appts':s==='msgs'?'msgs':s==='settings'?'settings':s==='earn'?'earn':'list';const un=unreadCount();
+  const s=view.screen,active=s==='appts'?'appts':s==='msgs'?'msgs':s==='settings'?'settings':s==='earn'?'earn':s==='aes'||(s==='patient'&&isAes(P()))?'aes':'list';const un=unreadCount();
   const lic=clinic.lic;const ini=(me.name||'?').replace(/^Dr\.?\s*/i,'').trim().slice(0,1).toUpperCase();
   return `<div class="shell">
   <aside class="sidebar" aria-label="Main menu">
-    <div class="side-brand">${toothMark()}<span>Clinic Patient Records</span></div>
+    <div class="side-brand">${clinicMark()}<span>${branding.logo?esc(clinic.name):'Clinic Patient Records'}</span></div>
     ${clockHtml()}
     <div class="side-clinic"><b>${esc(clinic.name)}</b>${lic&&lic.state==='trial'?`<span>Free trial · ${lic.daysLeft} day${lic.daysLeft>1?'s':''} left</span>`:lic&&lic.state==='expired'?'<span class="bad">Trial ended · read-only</span>':clinic.address?`<span>${esc(clinic.address)}</span>`:''}</div>
     <nav class="side-nav">
-      <button class="${active==='list'?'on':''}" data-home="list">${icon('people')}<span>Patients</span><em>${db.patients.length}</em></button>
+      <button class="${active==='list'?'on':''}" data-home="list">${icon('people')}<span>Patients</span><em>${db.patients.filter(p=>!isAes(p)).length}</em></button>
+      <button class="${active==='aes'?'on':''}" data-home="aes">${icon('sparkle')}<span>Aesthetics</span><em>${db.patients.filter(isAes).length}</em></button>
       <button class="${active==='appts'?'on':''}" data-home="appts">${icon('calendar')}<span>Appointments</span></button>
       <button class="${active==='msgs'?'on':''}" data-home="msgs">${icon('chat')}<span>Messages</span>${un?`<em class="badge">${un}</em>`:''}</button>
       ${isAdmin()?`<button class="${active==='earn'?'on':''}" data-home="earn">${icon('money')}<span>Earnings</span>${earnOpen()?'':`<em class="lockmark" title="PIN protected">${icon('lock')}</em>`}</button>`:''}
@@ -1283,6 +1555,7 @@ function icon(n){const p={
   chat:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   camera:'<path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   logout:'<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4M6 12h10"/>',
+  sparkle:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
   lock:'<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.3"/>',
   money:'<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.8"/><path d="M6.5 9.5v5M17.5 9.5v5"/>'}[n]||'';
   return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`}
@@ -1351,21 +1624,23 @@ function onboardView(){
   <div class="row" style="justify-content:center">${memberships.length?'<button class="btn small" data-act="back">← Back to my clinic</button>':''}<button class="btn small" data-act="logout">Log out</button></div></div>`;
 }
 
-function listView(){
-  const q=view.q.toLowerCase();
-  const list=db.patients.filter(p=>(p.first+' '+p.last+' '+(p.phone||'')+' '+(p.cnic||'')+' '+(p.oldFile||'')).toLowerCase().includes(q))
+function aesView(){return listView('aes')}
+function listView(sec){
+  const AES=sec==='aes';const q=view.q.toLowerCase();
+  const pool=db.patients.filter(p=>AES?isAes(p):!isAes(p));
+  const list=pool.filter(p=>(p.first+' '+p.last+' '+(p.phone||'')+' '+(p.cnic||'')+' '+(p.oldFile||'')).toLowerCase().includes(q))
    .sort((a,b)=>(a.last||'').localeCompare(b.last||''));
   return `
   ${clockMini()}
   <header class="top">
-    <div style="min-width:0"><h1>${esc(clinic.name)}</h1><div class="sub">${db.patients.length} patient${db.patients.length===1?'':'s'} · ${esc(me.name)} ${syncBadge()}${clinic.lic&&clinic.lic.state==='trial'?`<span class="pill warn">Trial · ${clinic.lic.daysLeft} day${clinic.lic.daysLeft>1?'s':''} left</span>`:''}</div></div>
+    <div style="min-width:0"><h1>${AES?'Aesthetics':esc(clinic.name)}</h1><div class="sub">${AES?esc(clinic.name)+' · ':''}${pool.length} ${AES?'aesthetic ':''}patient${pool.length===1?'':'s'} · ${esc(me.name)} ${syncBadge()}${clinic.lic&&clinic.lic.state==='trial'?`<span class="pill warn">Trial · ${clinic.lic.daysLeft} day${clinic.lic.daysLeft>1?'s':''} left</span>`:''}</div></div>
     <button class="btn small desk-hide" data-act="settings">Clinic & account</button>
   </header>
-  ${homeNav('list')}
+  ${homeNav(AES?'aes':'list')}
   ${deviceBanner()}
   <div class="row">
-    <input type="search" id="search" placeholder="Search name, phone, CNIC or file no." value="${esc(view.q)}" style="flex:1;min-width:0">
-    ${isAcct()?'':`<button class="btn" data-act="impOpen" ${readOnly()?'disabled':''}>+ Old patient</button><button class="btn primary" data-act="newPatient" ${readOnly()?'disabled':''}>+ New patient</button>`}
+    <input type="search" id="search" placeholder="${AES?'Search aesthetic patients – name, phone, CNIC':'Search name, phone, CNIC or file no.'}" value="${esc(view.q)}" style="flex:1;min-width:0">
+    ${isAcct()?'':`<button class="btn" data-act="impOpen" data-sec="${AES?'aes':''}" ${readOnly()?'disabled':''}>+ Old patient</button><button class="btn primary" data-act="newPatient" data-sec="${AES?'aes':''}" ${readOnly()?'disabled':''}>+ New ${AES?'aesthetic ':''}patient</button>`}
   </div>
   ${view.impOpen?importPanel():''}
   <section class="panel">
@@ -1402,7 +1677,8 @@ function settingsView(){
   <header class="top desk-hide"><button class="btn small" data-act="back">← Patients</button>${syncBadge()}</header>
   <h1>Clinic & account</h1>
   <p class="small muted" style="margin:-6px 0 12px">App version: <b>${APP_VERSION}</b></p>
-  <section class="panel desk-hide"><div class="row"><span>Sounds</span><span class="spacer"></span><button class="btn small" data-act="toggleSound">${Sound.on?'Sound on – turn off':'Sound off – turn on'}</button></div></section>
+  ${brandingPanel()}
+  ${soundsPanel()}
   ${msgHtml()}
   ${activationPanel(admin)}
   <form class="panel" id="clinicForm">
@@ -1497,7 +1773,7 @@ function greeting(){const h=new Date().getHours();return h<12?'Good morning':h<1
 function welcomeView(){
   return `<div class="welcome">
     <div class="welcome-card">
-      <div class="welcome-mark">${toothMark()}</div>
+      <div class="welcome-mark ${branding.logo?'haslogo':''}">${clinicMark()}</div>
       <p class="welcome-hi">${greeting()}, ${esc(me.name)}</p>
       <h1>Welcome to ${esc(clinic.name)}</h1>
       <p class="muted" style="margin:0">${clockParts().date}</p>
@@ -1584,10 +1860,10 @@ function paperGuide(p){
   const done=p.plan.filter(i=>i.status==='completed').length;
   const steps=[['details','1','Details','Name, mobile, old file no. and first visit date',!!(p.first||'').trim()],
     ['mh','2','Medical history','As written in the file',!!(p.mh&&p.mh.date)],
-    ['chart','3','Chart','Teeth as found at the last visit',Object.keys(p.chart||{}).length+Object.keys(p.surf||{}).length>0],
-    ['plan','4','Past treatments','Add each one (RCT, scaling…) with its date in "Done on"',done>0],
+    ...(isAes(p)?[]:[['chart','3','Chart','Teeth as found at the last visit',Object.keys(p.chart||{}).length+Object.keys(p.surf||{}).length>0]]),
+    ['plan','4','Past treatments',isAes(p)?'Add each one (laser, Botox, PRP…) with its date in "Done on"':'Add each one (RCT, scaling…) with its date in "Done on"',done>0],
     ['pay','5','Past payments','With the date they were paid',false],
-    ['xrays','6','Photo of the file','Optional – save the paper as "Old record (scan)"',false]];
+    ['xrays','6',isAes(p)?'Photos':'Photo of the file',isAes(p)?'Before/after photos and the paper file':'Optional – save the paper as "Old record (scan)"',false]];
   return `<section class="paperguide" aria-label="Old patient guide">
     <div class="row"><b>Writing in an old patient from paper</b><span class="spacer"></span><button class="btn small primary" data-act="paperDone">✓ Finished – make normal patient</button></div>
     <div class="pgsteps">${steps.map(([t,n,l,h,ok])=>`<button class="pgstep ${view.tab===t?'on':''} ${ok?'ok':''}" data-tab="${t}"><em>${ok?'✓':n}</em><span><b>${l}</b><small>${h}</small></span></button>`).join('')}</div>
@@ -1597,7 +1873,8 @@ function patientView(){
   const p=P();if(!p){view.screen='list';return listView();}
   migrate(p);
   const al=alertsOf(p),ms=mhStatus(p);
-  const tabs=[['details','Details'],['mh','Medical history'],['chart','Chart'],['plan','Treatment plan'],['pay','Payments'],['notes','Clinical notes'],['xrays','X-rays'],['appts','Appointments']];
+  const tabs=isAes(p)?[['details','Details'],['mh','Medical history'],['plan','Treatments'],['pay','Payments'],['notes','Clinical notes'],['xrays','Photos'],['appts','Appointments']]:[['details','Details'],['mh','Medical history'],['chart','Chart'],['plan','Treatment plan'],['pay','Payments'],['notes','Clinical notes'],['xrays','X-rays'],['appts','Appointments']];
+  if(isAes(p)&&view.tab==='chart')view.tab='details';
   let body={details:detailsTab,mh:mhTab,chart:chartTab,plan:planTab,pay:payTab,notes:notesTab,xrays:xrayTab,appts:apptTab}[view.tab](p);
   if(isAcct()&&['details','mh','chart','plan'].includes(view.tab))body=`<fieldset class="ro" disabled>${body}</fieldset>`;
   return `
@@ -1647,12 +1924,13 @@ function mhTab(p){
   return `<section class="panel">
     <div class="row"><h2>Medical history questionnaire</h2><span class="spacer"></span><span class="pill ${mhStatus(p).cls}">${mhStatus(p).t}</span></div>
     <p class="small muted" style="margin:0">Go through each question with the patient. Update at every check-up and before any treatment. A “Yes” answer adds a medical alert to the banner.</p>
-    <div class="mhq">${MH.map(([k,q])=>{const a=mh.answers[k]||{};return `<div class="q">
+    <div class="mhq">${(isAes(p)?AES_MH:MH).map(([k,q])=>{const a=mh.answers[k]||{};return `<div class="q">
       <span>${q}</span>
       <span class="yn"><button class="y ${a.v==='y'?'on':''}" data-mh="${k}" data-v="y">Yes</button><button class="n ${a.v==='n'?'on':''}" data-mh="${k}" data-v="n">No</button></span>
       ${a.v==='y'?`<input type="text" class="det" data-mhd="${k}" id="mhd-${k}" placeholder="Details" value="${esc(a.d)}">`:''}
     </div>`}).join('')}</div>
     <label class="f"><span>Current medicines (name, dose, how often)</span><textarea data-mhf="meds" id="mh-meds">${esc(mh.meds)}</textarea></label>
+    ${isAes(p)?aesMhExtra(p):''}
     <div class="grid2">
       <label class="f"><span>Smoking / vaping / sheesha</span><input type="text" data-mhf="smoke" id="mh-smoke" placeholder="e.g. 10 cigarettes / day" value="${esc(mh.smoke)}"></label>
       <label class="f"><span>Paan, gutka, naswar or chhalia</span><input type="text" data-mhf="tobacco" id="mh-tobacco" placeholder="what, how often, how many years" value="${esc(mh.tobacco)}"></label>
@@ -1876,6 +2154,38 @@ function toothBtn(p,n,lower){
   const sum=summaryOf(p,n).map(x=>x.s+' '+x.txt).join(', ');
   return `<button class="tooth ${chartStyle()==='natural'?'natv':''} ${lower?'lo':''} ${isPrim(n)?'prim':''} ${view.tooth===n?'sel':''}" data-tooth="${n}" aria-label="Tooth ${n}: ${st.label}${impText(p,n)}${prosText(p,n)}${p.rct[n]?', root canal treated':''}${sum?', '+sum:''}"><span>${n}</span>${chartStyle()==='natural'?naturalSVG(p,n,false)+'<span class="sq">'+toothSVG(p,n,false,true)+'</span>':toothSVG(p,n,false)}${toothHasXray(n)?'<i class="xr-dot" title="Has X-ray"></i>':''}<span class="code">${esc(code)||(p.toothNotes[n]?'•':'')}</span></button>`;
 }
+/* Old patient from paper: save what is charted on a tooth as a past treatment with its date */
+function pastSuggest(p,t){
+  const st=p.chart[t]||'',m=(p.pros||{})[t]||'',sf=p.surf[t]||{};
+  const crownOf={PFM:'Crown – PFM',ZR:'Crown – zirconia',EMX:'Crown – E-max',CER:'Crown – full ceramic',FM:'Crown – full metal',AU:'Crown – full metal',TMP:'Crown – PFM'};
+  const bridgeOf={PFM:'Bridge – PFM',ZR:'Bridge – zirconia',EMX:'Bridge – E-max',FM:'Bridge – full metal',AU:'Bridge – full metal'};
+  const out=[];
+  if(p.rct&&p.rct[t])out.push('Root canal treatment');
+  if(st==='crown')out.push(crownOf[m]||'Crown – PFM');
+  if(st==='abut'||st==='bridge')out.push(bridgeOf[m]||'Bridge – PFM');
+  if(st==='implant')out.push('Implant placement','Implant crown');
+  if(st==='veneer')out.push('Veneer');
+  if(st==='missing')out.push('Extraction');
+  const fills=Object.entries(sf).filter(([k,v])=>v.t==='fill');
+  if(fills.length){const mt=MT[fills[0][1].m]||MT.comp;out.push(mt.proc)}
+  return out.length?out:['Filling – composite'];
+}
+function pastBox(p,t){
+  const sug=pastSuggest(p,t),sel=view.pastProc&&PROCS.includes(view.pastProc)?view.pastProc:sug[0];
+  const fillS=Object.entries(p.surf[t]||{}).filter(([k,v])=>v.t==='fill').map(([k])=>surfLabel(t,k)).join('');
+  const hist=p.plan.filter(i=>i.status==='completed'&&String(i.tooth)===String(t)).sort((a,b)=>String(b.doneDate||'').localeCompare(String(a.doneDate||'')));
+  return `<div class="impbox pastbox"><h3>Past treatment on tooth ${t} – from the paper file</h3>
+    <p class="small muted" style="margin:0">Chart the tooth above, then save each treatment with the date written in the file.</p>
+    <div class="grid3">
+      <label class="f"><span>Treatment</span><select id="pt-proc">${[...new Set([...sug,...PROCS])].map(o=>`<option ${o===sel?'selected':''}>${esc(o)}</option>`).join('')}</select></label>
+      <label class="f"><span>Done on</span><input type="date" id="pt-date" max="${today()}" value="${esc(view.pastDate||'')}"></label>
+      <label class="f"><span>Fee (Rs)</span><input type="number" inputmode="numeric" id="pt-fee" min="0" step="1" placeholder="0"></label>
+    </div>
+    <input type="hidden" id="pt-surf" value="${esc(fillS)}">
+    <div class="row"><button class="btn primary small" data-act="addPast">+ Save to history</button></div>
+    ${hist.length?`<div class="summary">${hist.map(i=>`<span><b>${i.doneDate?fmtDate(i.doneDate):'no date'}</b> · ${esc(i.proc)}${i.surf?' ('+esc(i.surf)+')':''}${+i.fee?' · '+money(i.fee):''}</span>`).join('')}</div>`:''}
+  </div>`;
+}
 function editor(p,t,mode,mat,sum){
   const cur=p.chart[t]||'';
   return `<div class="panel" style="background:var(--bg)" id="editor">
@@ -1905,6 +2215,7 @@ function editor(p,t,mode,mat,sum){
       <label class="row small" style="gap:8px">Mobility <select id="mob" data-mob="${t}" style="width:auto">${MOB.map(o=>`<option value="${o}" ${(p.mob[t]||'')===o?'selected':''}>${o?'Grade '+o:'None'}</option>`).join('')}</select></label>
       <label class="f" style="flex:1;min-width:200px;flex-direction:row;align-items:center;gap:8px"><span style="white-space:nowrap">Note</span><input type="text" id="toothnote" data-tnote="${t}" value="${esc(p.toothNotes[t])}" placeholder="e.g. deep caries, TTP +, pericoronitis" aria-label="Note for tooth ${t}"></label>
     </div>
+    ${p.paperEntry?pastBox(p,t):''}
     ${toothXrayHtml(t)}
     <div class="row"><button class="btn" data-act="addToPlan">+ Add treatment for ${t}</button><span class="spacer"></span>${view.confirm==='clearTooth'?`<button class="btn small" data-act="cancelConfirm">Keep</button><button class="btn small danger" data-act="clearTooth">Yes, clear ${t}</button>`:`<button class="btn small danger" data-act="askClearTooth">Clear tooth</button>`}</div>
   </div>`;
@@ -1948,7 +2259,7 @@ function historyPanel(p){
   const h=p.plan.filter(i=>i.status==='completed').sort((a,b)=>String(b.doneDate||'').localeCompare(String(a.doneDate||'')));
   if(!h.length)return '';
   return `<section class="panel"><div class="row"><h2>Treatment history</h2><span class="spacer"></span><span class="small muted">${h.length} treatment${h.length===1?'':'s'} done · newest first</span></div>
-    <div class="tablewrap"><table class="att hist"><thead><tr><th>Date done</th><th>Tooth</th><th>Treatment</th><th style="text-align:right">Fee</th><th>By</th></tr></thead><tbody>
+    <div class="tablewrap"><table class="att hist"><thead><tr><th>Date done</th><th>${isAes(p)?'Area':'Tooth'}</th><th>Treatment</th><th style="text-align:right">Fee</th><th>By</th></tr></thead><tbody>
     ${h.map(i=>`<tr><td><b>${i.doneDate?fmtDate(i.doneDate):'–'}</b></td><td>${esc(i.tooth||'–')}</td><td>${esc(i.proc)}${i.surf?` <small class="muted">${esc(i.surf)}</small>`:''}</td><td style="text-align:right">${money(i.fee)}</td><td>${esc(i.doneBy||'')}</td></tr>`).join('')}
     </tbody></table></div></section>`;
 }
@@ -1960,10 +2271,10 @@ function planTabMain(p){
     <div class="totals"><div><span>Total</span><b>${money(tot)}</b></div><div><span>Completed</span><b>${money(done)}</b></div><div><span>Outstanding</span><b>${money(tot-done)}</b></div></div>
     ${p.plan.some(i=>i.status==='completed'&&i.doneDate===today())?`<div class="row"><button class="btn" data-act="printToday">Print today's record</button><button class="btn" data-act="saveToday">Save today's record (PDF)</button></div>`:''}
     ${form?itemForm(form):''}
-    ${p.plan.length?PHASES.map(([n,l])=>{const items=p.plan.filter(i=>+i.phase===n);if(!items.length)return '';
+    ${p.plan.length?phasesFor(p).map(([n,l])=>{const items=p.plan.filter(i=>+i.phase===n);if(!items.length)return '';
       return `<div class="phase"><h3><span class="pill info">Phase ${n}</span>${l}</h3>${items.map(i=>`<div class="item ${i.status==='completed'?'done':''}">
         <span class="tn">${esc(i.tooth||'—')}</span>
-        <span class="pr">${esc(i.proc)}${i.surf?`<small>Surfaces: ${esc(i.surf)}</small>`:''}${i.status==='completed'&&i.doneDate?`<small>Completed ${fmtDate(i.doneDate)}${i.doneBy?' by '+esc(i.doneBy):''}</small>`:''}</span>
+        <span class="pr">${esc(i.proc)}${i.surf?`<small>${isAes(p)?'Amount':'Surfaces'}: ${esc(i.surf)}</small>`:''}${i.status==='completed'&&i.doneDate?`<small>Completed ${fmtDate(i.doneDate)}${i.doneBy?' by '+esc(i.doneBy):''}</small>`:''}</span>
         <span class="fee">${money(i.fee)}</span>
         <span class="acts">${i.status==='completed'?`<span class="pill ok">✓ Completed</span><button class="btn small" data-undo="${i.id}">Undo</button>`:`<button class="btn small" data-done="${i.id}">Mark completed</button>`}<span class="spacer"></span><button class="btn small" data-edit="${i.id}">Edit</button><button class="btn small danger" data-del="${i.id}">Remove</button></span>
       </div>`).join('')}</div>`}).join(''):`<div class="empty">No treatment planned yet. Add items here or from the chart.</div>`}
@@ -1978,12 +2289,13 @@ function itemForm(f){
   return `<div class="panel" style="background:var(--bg)">
     <h3>${f.id?'Edit item':'New item'}</h3>
     <div class="grid2">
-      <label class="f"><span>Tooth (FDI) or area</span><input type="text" id="it-tooth" value="${esc(f.tooth)}" placeholder="e.g. 26, UL, full mouth"></label>
-      <label class="f"><span>Surfaces</span><input type="text" id="it-surf" value="${esc(f.surf)}" placeholder="M O D B L"></label>
+      ${isAes(P())?`<label class="f"><span>Area</span><input type="text" id="it-tooth" value="${esc(f.tooth)}" placeholder="e.g. forehead, lips, full face, scalp"></label>
+      <label class="f"><span>Amount / session</span><input type="text" id="it-surf" value="${esc(f.surf)}" placeholder="e.g. 20 units, 1 ml, 2500 grafts, session 2 of 6"></label>`:`<label class="f"><span>Tooth (FDI) or area</span><input type="text" id="it-tooth" value="${esc(f.tooth)}" placeholder="e.g. 26, UL, full mouth"></label>
+      <label class="f"><span>Surfaces</span><input type="text" id="it-surf" value="${esc(f.surf)}" placeholder="M O D B L"></label>`}
     </div>
-    <label class="f"><span>Treatment</span><select id="it-proc">${PROCS.map(o=>`<option ${f.proc===o?'selected':''}>${o}</option>`).join('')}</select></label>
+    <label class="f"><span>Treatment</span><select id="it-proc">${procOptions(P(),f.proc)}</select></label>
     <div class="grid2">
-      <label class="f"><span>Phase</span><select id="it-phase">${PHASES.map(([n,l])=>`<option value="${n}" ${+f.phase===n?'selected':''}>${n} · ${l}</option>`).join('')}</select></label>
+      <label class="f"><span>Phase</span><select id="it-phase">${phasesFor(P()).map(([n,l])=>`<option value="${n}" ${+f.phase===n?'selected':''}>${n} · ${l}</option>`).join('')}</select></label>
       <label class="f"><span>Fee (Rs)</span><input type="number" inputmode="numeric" id="it-fee" value="${esc(f.fee)}" min="0" step="1"></label>
     </div>
     <label class="f" style="max-width:280px"><span>${(P()||{}).paperEntry?'<b>Done on</b> – the date written in the paper file':'Already done on (for old or past treatment)'}</span><input type="date" id="it-done" value="${esc(f.status==='completed'?(f.doneDate||''):'')}" max="${today()}"></label>
@@ -2027,6 +2339,20 @@ document.addEventListener('submit',async e=>{
     if(f.id==='ownerErase'){if(!view.ownerOk||!LOCAL||OWNER_TEST)return;if(v('own-erase')!=='ERASE')throw new Error('Type ERASE in capital letters to confirm.');
       await window.__LOCAL_DB.wipeAll();try{Object.keys(localStorage).filter(k=>k.startsWith('offline:')).forEach(k=>localStorage.removeItem(k))}catch(e){}
       alert('All clinics on this device were erased. The app will start fresh.');location.href=location.pathname;return}
+    if(f.id==='expForm'){const x=readExpForm();const amt=Math.round(parseFloat(x.amount)||0);
+      if(!(amt>0))throw new Error('Enter the amount.');if(!x.date)throw new Error('Choose the date.');
+      if(x.cat==='Materials'&&!x.item)throw new Error('Write the material name.');
+      await finSave('expense',{date:x.date,cat:x.cat,lab:x.cat==='Lab charges'?x.lab:'',item:x.item,pat:x.cat==='Lab charges'?x.pat:'',amount:amt,note:x.note});
+      earn.expForm={date:x.date,cat:x.cat};render();toast('Expense saved');return}
+    if(f.id==='staffForm'){const g=id=>($('#'+id)||{}).value||'';const name=g('sf-name').trim();if(!name)throw new Error('Write the name.');
+      const data={name,role:g('sf-role'),roleName:g('sf-rolename').trim(),pay:g('sf-pay'),salary:Math.max(0,Math.round(parseFloat(g('sf-salary'))||0)),percent:Math.min(100,Math.max(0,parseFloat(g('sf-pct'))||0)),active:true};
+      if(data.pay==='percent'&&!data.percent)throw new Error('Enter the percentage.');
+      const e2=earn.staffEdit?finOf('staff').find(r=>r.id===earn.staffEdit):null;
+      await finSave('staff',e2?Object.assign({},e2.data,data):data,e2&&e2.id);earn.staffEdit=null;earn.staffNew=false;render();toast('Staff saved');return}
+    if(f.id==='dentPayForm'){const name=earn.dentist;if(!name)return;const type=(document.querySelector('input[name=dp-type]:checked')||{}).value||'fixed';
+      const salary=Math.max(0,Math.round(parseFloat($('#dp-salary').value)||0)),percent=Math.min(100,Math.max(0,parseFloat($('#dp-pct').value)||0));
+      if(type==='percent'&&!percent)throw new Error('Enter the percentage.');
+      const ex=staffFor(name);await finSave('staff',Object.assign({},ex?ex.data:{},{name,role:'Dentist',pay:type,salary,percent,active:true}),ex&&ex.id);render();toast('Pay saved for '+name);return}
     if(f.id==='earnLock'){const pin=$('#earn-pin').value.trim();const mp=myPin();
       if(!mp){earn.mode='set';render();return}
       if(earn.tries>=5){earn.err='Too many wrong tries. Set a new PIN with your login password.';earn.mode='set';earn.tries=0;render();return}
@@ -2168,6 +2494,33 @@ document.addEventListener('click',async e=>{
   if(d.earnper){earn.period=d.earnper;render();return}
   if(d.earnnav!==undefined){earnShift(+d.earnnav);render();return}
   if(d.act==='earnCsv'){earnCsv();return}
+  if(d.bgset!==undefined){if(!isAdmin())return;if(d.bgset==='photo'&&!branding.bgImage){view.bgPhoto=true;render();toast('Choose a photo for the background');return}
+    try{await saveBranding({bg:d.bgset});view.bgPhoto=false;render();toast('Background changed')}catch(err){toast(friendly(err))}return}
+  if(d.act==='logoRemove'){try{await saveBranding({logo:''});render();toast('Logo removed')}catch(err){toast(friendly(err))}return}
+  if(d.tonetest){Sound.preset(Sound.toneFor(d.tonetest));return}
+  if(d.earnsec){earn.sec=d.earnsec;render();return}
+  if(d.earntab){earn.tab=d.earntab;earn.staffEdit=null;earn.staffNew=false;render();return}
+  if(d.earndent!==undefined){earn.dentist=earn.dentist===d.earndent?'':d.earndent;render();return}
+  if(d.act==='earnPdf'){try{await earnPdf(earn.printWhat||'all')}catch(err){toast(friendly(err))}return}
+  if(d.act==='printDentist'){try{await earnPdf('dentist',earn.dentist)}catch(err){toast(friendly(err))}return}
+  if(d.act==='staffNew'){earn.staffNew=true;earn.staffEdit=null;render();const i=$('#sf-name');if(i)i.focus();return}
+  if(d.act==='staffCancel'){earn.staffNew=false;earn.staffEdit=null;render();return}
+  if(d.staffedit){earn.staffEdit=d.staffedit;earn.staffNew=false;render();return}
+  if(d.staffremove){const r=finOf('staff').find(x=>x.id===d.staffremove);if(!r)return;if(!confirm('Remove '+r.data.name+' from staff? Past salary records stay.'))return;
+    try{await finSave('staff',Object.assign({},r.data,{active:false}),r.id);earn.staffEdit=null;render();toast('Removed from staff')}catch(err){toast(friendly(err))}return}
+  if(d.salpaid){const r=finOf('staff').find(x=>x.id===d.salpaid);if(!r)return;const month=(earn.anchor||today()).slice(0,7);
+    const ans=prompt('Salary paid to '+r.data.name+' for '+month+' (Rs):',d.amt||'0');if(ans===null)return;const amt=Math.max(0,Math.round(parseFloat(ans)||0));
+    const ex=finOf('salary').find(x=>x.data.staff_id===r.id&&x.data.month===month);
+    try{await finSave('salary',{staff_id:r.id,month,amount:amt,status:'paid',paid_on:today()},ex&&ex.id);render();toast('Marked as paid')}catch(err){toast(friendly(err))}return}
+  if(d.salunpaid){const month=(earn.anchor||today()).slice(0,7);const ex=finOf('salary').find(x=>x.data.staff_id===d.salunpaid&&x.data.month===month);
+    if(ex){try{await finSave('salary',Object.assign({},ex.data,{status:'unpaid',paid_on:''}),ex.id);render();toast('Marked as unpaid')}catch(err){toast(friendly(err))}}return}
+  if(d.askexpdel){view.confirm='expdel:'+d.askexpdel;render();return}
+  if(d.expdel){try{await finDel(d.expdel);view.confirm=null;render();toast('Expense deleted')}catch(err){toast(friendly(err))}return}
+  if(d.act==='addPast'){const t=view.tooth;if(!t||!p)return;const proc=$('#pt-proc').value,dt=$('#pt-date').value,fee=Math.max(0,Math.round(parseFloat($('#pt-fee').value)||0));
+    if(!dt){toast('Write the date the treatment was done.');$('#pt-date').focus();return}
+    if(dt>today()){toast('The date cannot be in the future.');return}
+    p.plan.push({id:uid(),tooth:String(t),proc,surf:/^Filling|^Inlay/.test(proc)?$('#pt-surf').value:'',phase:3,fee,status:'completed',doneDate:dt,doneBy:me.name});
+    view.pastDate=dt;view.pastProc=null;save();render();toast('Saved: '+proc+' on '+fmtDate(dt));return}
   if(d.act==='ownerOpen'){view.screen='owner';view.ownerOk=false;view.ownerErr='';render();const i=$('#own-code');if(i)i.focus();return}
   if(d.act==='ownerBack'){view.screen='auth';view.ownerOk=false;render();return}
   if(d.act==='ownerTest'){if(!view.ownerOk)return;try{sessionStorage.setItem('ownerTest','1')}catch(e){}location.href=location.pathname;return}
@@ -2182,10 +2535,13 @@ document.addEventListener('click',async e=>{
     else if(d.home==='msgs'){await loadMessages();try{await loadDay(today())}catch(e){}view.day=view.day||today();render();const hadUnread=unreadCount();await markRead();if(hadUnread)render();const cl=$('#chatList');if(cl)cl.scrollTop=cl.scrollHeight;}
     else render();return}
   if(d.month){view.month=d.month;await loadMonth(d.month);render();return}
-  if(d.arrived){const a=apptsDay.find(x=>x.id===d.arrived);if(!a)return;const p=db.patients.find(x=>x.id===a.patient_id);
+  if(d.arrived){view.arriveFor=d.arrived;render();window.scrollTo({top:0,behavior:'smooth'});return}
+  if(d.act==='arrCancel'){view.arriveFor=null;render();return}
+  if(d.arrsend){const a=apptsDay.find(x=>x.id===d.arrsend);if(!a)return;const p=db.patients.find(x=>x.id===a.patient_id);
+    const to=(document.querySelector('input[name=arr-to]:checked')||{}).value||'all';view.arriveFor=null;if(LOCAL)Sound.play('arrival');
     const {error}=await sb.from('appointments').update({status:'arrived'}).eq('id',a.id);if(error){toast(friendly(error));return}a.status='arrived';
-    try{await sendMessage(a.dentist_id&&a.dentist_id!==user.id?a.dentist_id:'all',(p?p.first+' '+p.last:'Patient')+' has arrived for '+(a.reason||'the appointment')+' at '+hhmm(a.starts_at)+'.',{kind:'arrived',patient_id:a.patient_id})}catch(e){}
-    toast((p?p.first:'Patient')+' marked as arrived – dentist notified');render();return}
+    try{await sendMessage(to===user.id?'all':to,(p?p.first+' '+p.last:'Patient')+' has arrived for '+(a.reason||'the appointment')+' at '+hhmm(a.starts_at)+'.',{kind:'arrived',patient_id:a.patient_id})}catch(e){}
+    toast((p?p.first:'Patient')+' marked as arrived – '+(to==='all'?'everyone':(team.find(t=>t.user_id===to)||{}).name||'dentist')+' notified');render();return}
   if(d.day){view.day=d.day;view.confirm=null;render();refreshAppts();return}
   if(d.sms){sendReminder(d.sms,'sms');return}
   if(d.wa){sendReminder(d.wa,'wa');return}
@@ -2208,7 +2564,7 @@ document.addEventListener('click',async e=>{
   if(d.askadel){view.confirm='adel:'+d.askadel;render();return}
   if(d.adel){const {error}=await sb.from('appointments').delete().eq('id',d.adel);if(error){toast(friendly(error));return}apptsDay=apptsDay.filter(a=>a.id!==d.adel);apptsPatient=apptsPatient.filter(a=>a.id!==d.adel);view.confirm=null;render();toast('Appointment deleted');return}
   if(d.authtab){view.authTab=d.authtab;view.msg=null;render();return}
-  if(d.open){xrView=null;stopXrWatch();if(view.screen==='appts')view.backTo='appts';else view.backTo='list';view=Object.assign(view,{screen:'patient',pid:d.open,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();scrollTo(0,0);return}
+  if(d.open){xrView=null;stopXrWatch();if(view.screen==='appts')view.backTo='appts';else if(view.screen==='aes')view.backTo='aes';else{const op=db.patients.find(x=>x.id===d.open);view.backTo=isAes(op)?'aes':'list'}view=Object.assign(view,{screen:'patient',pid:d.open,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();scrollTo(0,0);return}
   if(d.tab){view.tab=d.tab;view.tooth=null;view.addItem=null;view.confirm=null;if(d.tab==='appts'){apptsPatient=[];apptsLoading=true;render();refreshAppts();}else if(d.tab==='xrays'){xrays=[];xrView=null;render();refreshXrays();startXrWatch();}else if(d.tab==='chart'){stopXrWatch();xrays=[];render();refreshXrays();}else if(d.tab==='pay'){stopXrWatch();payList=[];view.payForm=null;render();refreshPayments();}else{stopXrWatch();render();}return}
   if(d.mh){p.mh.answers[d.mh]=Object.assign(p.mh.answers[d.mh]||{},{v:d.v});save();render();return}
   if(d.tooth){view.tooth=+d.tooth===view.tooth?null:+d.tooth;view.confirm=null;render();const ed=$('#editor');if(ed)ed.scrollIntoView({block:'nearest'});return}
@@ -2258,7 +2614,7 @@ document.addEventListener('click',async e=>{
       const flash=$('.cam-box');if(flash){flash.classList.add('flash');setTimeout(()=>flash.classList.remove('flash'),250)}
       view.xrKind=$('#xr-kind').value;await uploadXrays([f]);const v2=$('#camVideo');if(v2&&camStream){v2.srcObject=camStream;v2.play().catch(()=>{})}break;}
     case 'oldMoreRows':{const keep=[...document.querySelectorAll('#oldForm input,#oldForm select,#oldForm textarea')].map(x=>[x.id,x.value]);view.oldRows=(view.oldRows||3)+3;render();keep.forEach(([id,v])=>{const x=$('#'+id);if(x)x.value=v});break;}
-    case 'impOpen':view.impOpen=true;view.oldRows=3;impRows=null;impErr='';render();break;
+    case 'impOpen':view.impOpen=true;view.impSec=b.dataset.sec||'';view.oldRows=3;impRows=null;impErr='';render();break;
     case 'impClose':view.impOpen=false;impRows=null;impErr='';render();break;
     case 'impTemplate':{const csv='Name,File no.,Mobile,CNIC,Date of birth,Age,Sex,Address,First visit,Medical history,Past treatment,Balance\r\nAli Raza,1452,0300 1234567,35202-1234567-1,15/04/1985,,M,"Gulberg, Lahore",02/03/2019,Diabetes,"RCT 36 in 2021, scaling 2023",3000\r\n';
       deliverFile(new Blob(['\uFEFF'+csv],{type:'text/csv'}),'Old_patients_template.csv','save').then(ok=>{if(ok)toast('Template saved – open it in Excel, fill in your patients, save as CSV or Excel')});break;}
@@ -2289,12 +2645,13 @@ document.addEventListener('click',async e=>{
       const {error}=await sb.auth.resetPasswordForEmail(em,{redirectTo:location.origin+location.pathname});
       view.msg=error?{t:'err',m:friendly(error)}:{t:'ok',m:'If that email has an account, a reset link is on its way. Open it on this device.'};render();break;}
     case 'back':if(view.screen==='patient'&&view.backTo==='appts'){view=Object.assign(view,{screen:'appts',pid:null,confirm:null});render();refreshAppts();break;}
+      if(view.screen==='patient'&&(view.backTo==='aes'||isAes(P()))){view=Object.assign(view,{screen:'aes',pid:null,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();break;}
       view=Object.assign(view,{screen:memberships.length?'list':'onboard',pid:null,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();break;
     case 'settings':view.newRecovery=null;if(isAdmin()||isAcct()){attRows=null;loadAttendance(attDay||today()).then(()=>{if(view.screen==='settings')softRender()})}if(LOCAL){snapList=null;window.__LOCAL_DB.listSnapshots().then(l=>{snapList=l;if(view.screen==='settings')softRender()})}view.screen='settings';view.confirm=null;view.msg=null;render();loadTeam().then(()=>{if(view.screen==='settings')softRender()});break;
     case 'onboard':view.screen='onboard';view.msg=null;render();break;
-    case 'paperPatient':{const np=blankPatient();np.paperEntry=true;db.patients.push(np);markDirty(np.id);view.impOpen=false;view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
+    case 'paperPatient':{const np=blankPatient();np.paperEntry=true;if(view.impSec==='aes')np.kind='aesthetic';db.patients.push(np);markDirty(np.id);view.impOpen=false;view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
     case 'paperDone':{const p=P();if(!p)break;if(!(p.first||'').trim()){toast('Write the patient\'s name first.');view.tab='details';render();break}delete p.paperEntry;save();render();toast('Saved – now a normal patient');break;}
-    case 'newPatient':{const np=blankPatient();db.patients.push(np);markDirty(np.id);view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
+    case 'newPatient':{const np=blankPatient();if(b.dataset.sec==='aes'||view.screen==='aes')np.kind='aesthetic';db.patients.push(np);markDirty(np.id);view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
     case 'example':{const np=sample();np.notes[0].by=me.name;db.patients.push(np);markDirty(np.id);render();toast('Example patient added');break;}
     case 'askDelete':if(isAcct()){toast('Only dentists can delete patient records.');break;}view.confirm='delete';render();break;
     case 'cancelConfirm':view.confirm=null;render();break;
@@ -2317,9 +2674,9 @@ document.addEventListener('click',async e=>{
     case 'saveRecord':printRecord(p,$('#pr-date').value||today(),'save');break;
     case 'printToday':printRecord(p,today(),'print');break;
     case 'saveToday':printRecord(p,today(),'save');break;
-    case 'newItem':view.addItem={tooth:'',surf:'',proc:PROCS[0],phase:3,fee:''};render();break;
+    case 'newItem':{const pp=P();view.addItem={tooth:'',surf:'',proc:isAes(pp)?'Aesthetic consultation':PROCS[0],phase:isAes(pp)?2:3,fee:''};render();break;}
     case 'cancelItem':view.addItem=null;render();break;
-    case 'saveItem':{const f=view.addItem,it={id:f.id||uid(),tooth:$('#it-tooth').value.trim(),surf:$('#it-surf').value.trim().toUpperCase(),proc:$('#it-proc').value,phase:+$('#it-phase').value,fee:parseFloat($('#it-fee').value)||0,status:f.status||'planned'};
+    case 'saveItem':{const f=view.addItem,it={id:f.id||uid(),tooth:$('#it-tooth').value.trim(),surf:isAes(P())?$('#it-surf').value.trim():$('#it-surf').value.trim().toUpperCase(),proc:$('#it-proc').value,phase:+$('#it-phase').value,fee:parseFloat($('#it-fee').value)||0,status:f.status||'planned'};
       if(f.doneDate){it.doneDate=f.doneDate;it.doneBy=f.doneBy}
       const dn=$('#it-done')&&$('#it-done').value;if(dn){it.status='completed';it.doneDate=dn;it.doneBy=it.doneBy||me.name}
       const ix=p.plan.findIndex(x=>x.id===it.id);if(ix>=0)p.plan[ix]=it;else p.plan.push(it);view.addItem=null;save();render();toast('Item saved');break;}
@@ -2351,6 +2708,15 @@ document.addEventListener('change',async e=>{
   const el=e.target;
   if(el.id==='restoreFile'&&el.files&&el.files[0]){try{const d=JSON.parse(await el.files[0].text());if(!d||d.app!=='clinic-records-local'||!d.tables)throw 0;
     view.restoreData=d;view.restoreInfo=(d.clinics||[]).join(', ')+' from '+fmtDate(String(d.exported||'').slice(0,10));view.confirm='restore';render();}catch(err){toast('That file is not a full backup from this app')}el.value='';return}
+  if(el.id==='earn-print'){earn.printWhat=el.value;return}
+  if((el.id==='brand-logo'||el.id==='brand-bg')&&el.files&&el.files[0]){const f=el.files[0];
+    try{if(el.id==='brand-logo'){const png=f.type==='image/png'||f.type==='image/webp';const url=await resizeImage(f,320,png?'image/png':'image/jpeg',0.9);await saveBranding({logo:url});toast('Logo saved')}
+      else{const url=await resizeImage(f,1600,'image/jpeg',0.72);await saveBranding({bg:'photo',bgImage:url});view.bgPhoto=false;toast('Background photo saved')}
+      render()}catch(err){toast(friendly(err))}return}
+  if(el.dataset&&el.dataset.tonefor){lsSet('tone:'+el.dataset.tonefor,el.value);const was=Sound.on;Sound.on=true;Sound.play(el.dataset.tonefor);Sound.on=was;return}
+  if(el.id==='snd-on'){if(Sound.on!==el.checked)Sound.toggle();render();return}
+  if(el.id==='snd-vol'){lsSet('soundVol',el.value);const was=Sound.on;Sound.on=true;Sound.play('success');Sound.on=was;return}
+  if(el.id==='ex-cat'){earn.expForm=readExpForm();earn.expForm.cat=el.value;render();return}
   if(el.id==='print-bal'){lsSet('printBal',el.checked?'on':'off');toast(el.checked?'Paid and balance will show on printouts':'Paid and balance hidden on printouts');return}
   if(el.id==='imp-file'&&el.files&&el.files[0]){await readImportFile(el.files[0]);el.value='';return}
   if(el.id==='tx-file'&&el.files&&el.files.length){if(isAcct()){toast('Accountants can view X-rays but not add them.');el.value='';return}
