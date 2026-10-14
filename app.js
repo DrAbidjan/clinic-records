@@ -7,7 +7,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
-const APP_VERSION='14 Oct 2026 · aesthetics, expenses, salaries, logo, tones';
+const APP_VERSION='14 Oct 2026 · salary payment method & receipt';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -1309,8 +1309,9 @@ function earnStaff(D){
     return `<tr><td><b>${esc(d.name)}</b><br><small class="muted">${esc(d.role)}${d.role==='Other'&&d.roleName?' – '+esc(d.roleName):''}</small></td>
       <td>${d.pay==='percent'?`${+d.percent||0}% of treatment`:`${money(d.salary)} / month`}</td>
       <td style="text-align:right">${money(paid?s.data.amount:due)}</td>
-      <td>${paid?`<span class="pill ok">Paid ${s.data.paid_on?fmtDate(s.data.paid_on):''}</span>`:'<span class="pill warn">Unpaid</span>'}</td>
-      <td><div class="row" style="flex-wrap:nowrap;gap:4px">${paid?`<button class="btn small" data-salunpaid="${r.id}">Mark unpaid</button>`:`<button class="btn small primary" data-salpaid="${r.id}" data-amt="${due}">Mark paid</button>`}<button class="btn small" data-staffedit="${r.id}">Edit</button></div></td></tr>`}).join('');
+      <td>${paid?`<span class="pill ok">Paid ${s.data.paid_on?fmtDate(s.data.paid_on):''}</span>${s.data.method?`<br><small class="muted">${esc(s.data.method)}${s.data.ref?' · '+esc(s.data.ref):''}</small>`:''}`:'<span class="pill warn">Unpaid</span>'}</td>
+      <td><div class="row" style="flex-wrap:nowrap;gap:4px">${paid?`<button class="btn small primary" data-salslip="${s.id}">${icon('doc')} Receipt</button><button class="btn small" data-salunpaid="${r.id}">Mark unpaid</button>`:`<button class="btn small primary" data-salpaid="${r.id}" data-amt="${due}">Mark paid</button>`}<button class="btn small" data-staffedit="${r.id}">Edit</button></div></td></tr>
+      ${earn.salForm&&earn.salForm.staff_id===r.id?`<tr><td colspan="5">${salFormHtml(r,month)}</td></tr>`:''}`}).join('');
   const e=earn.staffEdit?finOf('staff').find(r=>r.id===earn.staffEdit):null;const ed=e?e.data:(earn.staffNew?{role:'Assistant',pay:'fixed'}:null);
   return `<div class="row" style="gap:8px;flex-wrap:wrap"><p class="small muted" style="margin:0">Salaries for <b>${esc(mLabel)}</b> (change the month with ‹ › above, in Monthly view).</p><span class="spacer"></span><button class="btn small primary" data-act="staffNew">+ Add staff</button></div>
     ${ed?`<form id="staffForm" class="subpanel"><h3 style="margin:0">${e?'Edit '+esc(ed.name):'Add staff member'}</h3>
@@ -1335,6 +1336,37 @@ function earnPayments(D){
     ${D.pays.slice(0,300).map(x=>`<tr><td>${fmtDate(x.paid_on)}</td><td><button class="linkbtn" data-open="${x.patient_id}">${esc(patName(x.patient_id))}</button></td><td>${esc(x.method||'')}${x.reference?` <small class="muted">${esc(x.reference)}</small>`:''}</td><td style="text-align:right">${money(x.amount)}</td><td style="text-align:right">${+x.discount?money(x.discount):'–'}</td><td>${esc(x.received_by_name||'')}</td></tr>`).join('')}
     </tbody></table></div>${D.pays.length>300?'<p class="small muted">Showing the latest 300. Download the list for all.</p>':''}`:'<p class="muted" style="margin:0">No payments in this period.</p>'}
   </section>`;
+}
+const SAL_METHODS=['Cash','Bank transfer','JazzCash / Easypaisa','Cheque','Other'];
+function salFormHtml(r,month){const f=earn.salForm;
+  return `<form id="salForm" class="salform"><b>Pay ${esc(r.data.name)} – ${esc(parseD(month+'-01').toLocaleDateString('en-GB',{month:'long',year:'numeric'}))}</b>
+    <div class="grid3">
+      <label class="f"><span>Amount paid (Rs)</span><input type="number" id="sl-amt" min="0" step="1" inputmode="numeric" value="${esc(f.amount)}" required></label>
+      <label class="f"><span>Paid on</span><input type="date" id="sl-date" value="${today()}" max="${today()}"></label>
+      <label class="f"><span>Reference (optional)</span><input type="text" id="sl-ref" placeholder="transaction ID or cheque no."></label>
+    </div>
+    <div class="chips">${SAL_METHODS.map((m,i)=>`<label class="chip"><input type="radio" name="sl-method" value="${m}" ${i===0?'checked':''}> ${m}</label>`).join('')}</div>
+    <div class="row"><button class="btn primary" type="submit">Save as paid</button><button class="btn" type="button" data-act="salCancel">Cancel</button></div>
+  </form>`}
+async function salarySlip(salId){
+  if(!window.jspdf){toast('The PDF tool did not load. Check your internet and reload the page.');return}
+  const s=finOf('salary').find(x=>x.id===salId);if(!s)return;const st=finOf('staff').find(x=>x.id===s.data.staff_id)||{data:{name:'Staff',role:''}};
+  const d=s.data,sd=st.data;const P=pdfBase('Salary receipt');const {doc,W,M,st:y,C}=P;
+  const mLabel=parseD(d.month+'-01').toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+  const no='SAL-'+String(d.month).replace('-','')+'-'+String(salId).replace(/-/g,'').slice(0,4).toUpperCase();
+  P.kv('Paid to',sd.name+(sd.role?' ('+(sd.role==='Other'&&sd.roleName?sd.roleName:sd.role)+')':''),M,95);P.kv('Receipt no.',no,M+100,40);P.kv('Date paid',d.paid_on?fmtDate(d.paid_on):'–',W-M-34,34);y.y+=13;
+  P.kv('Salary for',mLabel,M,95);P.kv('Payment method',(d.method||'–')+(d.ref?' – '+d.ref:''),M+100,80);y.y+=13;
+  P.sec('Pay');
+  const two=(l,v,b)=>P.row([l,v],[M,W-M],{right:[1],bold:b,w:[140,50]});
+  if(sd.pay==='percent'){const f=d.month+'-01',t=isoD(new Date(+d.month.slice(0,4),+d.month.slice(5,7),0));const v=doneIn(f,t,sd.name).reduce((a,x)=>a+(+x.i.fee||0),0);
+    two('Treatment done in '+mLabel,money(v));two('Share',(+sd.percent||0)+'%');}
+  else two('Monthly salary',money(sd.salary));
+  doc.setDrawColor(...C.LINE);doc.line(M,y.y-3.6,W-M,y.y-3.6);two('Amount paid',money(d.amount),true);
+  P.row(['In words: Rupees '+numWords(d.amount)+' only'],[M],{color:C.MUT,size:9,w:[170]});
+  y.y+=34;doc.setDrawColor(...C.INK);doc.line(M,y.y,M+70,y.y);doc.line(W-M-70,y.y,W-M,y.y);
+  doc.setFontSize(8);doc.setTextColor(...C.MUT);doc.text('Paid by (clinic)',M,y.y+4);doc.text(P.clean(me.name),M,y.y+8);doc.text('Received by (staff signature)',W-M-70,y.y+4);doc.text(P.clean(sd.name),W-M-70,y.y+8);
+  doc.setFontSize(7.5);doc.text(P.clean(clinic.name)+' – salary receipt '+no,M,290);
+  await deliverFile(doc.output('blob'),('Salary_receipt_'+sd.name+'_'+d.month+'.pdf').replace(/[^\w.\-]+/g,'_'),'save');
 }
 const readExpForm=()=>{const g=id=>{const x=$('#'+id);return x?x.value:''};return {date:g('ex-date'),cat:g('ex-cat'),lab:g('ex-lab'),item:g('ex-item').trim(),pat:g('ex-pat').trim(),amount:g('ex-amt'),note:g('ex-note').trim()}};
 function earningsView(){
@@ -1394,7 +1426,7 @@ async function earnPdf(what,dentist){
       Object.entries(D.byDent).sort((a,b)=>b[1].v-a[1].v).forEach(([k,o])=>{const s=staffFor(k);P.row([k+(s&&s.data.pay==='percent'?'  ('+(+s.data.percent||0)+'% = '+money(Math.round(o.v*(+s.data.percent||0)/100))+')':''),String(o.n),money(o.v)],xs,{right:[1,2],w:[120,25,40]})})}
     if(what==='all'||what==='expenses'){P.sec('Expenses');if(D.exps.length){const xs=[M,M+24,M+70,W-M];D.exps.slice().reverse().forEach(r=>{const d=r.data;P.row([fmtDate(d.date),d.cat+(d.lab?' – '+d.lab:''),(d.item||'')+(d.pat?' · '+d.pat:''),money(d.amount)],xs,{right:[3],w:[22,46,90,30],size:8.5})});
         doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);two('Total expenses',money(D.expTotal),true);Object.entries(D.byCat).forEach(([k,v])=>two('   '+k,money(v)))}else P.row(['No expenses in this period.'],[M],{color:C.MUT});
-      P.sec('Salaries paid');if(D.sals.length){D.sals.forEach(r=>{const s=finOf('staff').find(x=>x.id===r.data.staff_id);two((s?s.data.name+' ('+s.data.role+')':'Staff')+' – '+r.data.month+(r.data.paid_on?', paid '+fmtDate(r.data.paid_on):''),money(r.data.amount))});two('Total salaries paid',money(D.salPaid),true)}else P.row(['No salaries marked as paid in this period.'],[M],{color:C.MUT})}
+      P.sec('Salaries paid');if(D.sals.length){D.sals.forEach(r=>{const s=finOf('staff').find(x=>x.id===r.data.staff_id);two((s?s.data.name+' ('+s.data.role+')':'Staff')+' – '+r.data.month+(r.data.paid_on?', paid '+fmtDate(r.data.paid_on):'')+(r.data.method?', '+r.data.method:''),money(r.data.amount))});two('Total salaries paid',money(D.salPaid),true)}else P.row(['No salaries marked as paid in this period.'],[M],{color:C.MUT})}
     if(what==='all'||what==='payments'){P.sec('Payments received');const xs=[M,M+24,M+82,M+125,W-M];D.pays.slice().reverse().forEach(x=>P.row([fmtDate(x.paid_on),patName(x.patient_id),x.method||'',x.received_by_name||'',money(x.amount)],xs,{right:[4],w:[22,56,42,40,30],size:8.5}));
       doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);two('Total received',money(D.received),true)}
   }
@@ -2339,6 +2371,12 @@ document.addEventListener('submit',async e=>{
     if(f.id==='ownerErase'){if(!view.ownerOk||!LOCAL||OWNER_TEST)return;if(v('own-erase')!=='ERASE')throw new Error('Type ERASE in capital letters to confirm.');
       await window.__LOCAL_DB.wipeAll();try{Object.keys(localStorage).filter(k=>k.startsWith('offline:')).forEach(k=>localStorage.removeItem(k))}catch(e){}
       alert('All clinics on this device were erased. The app will start fresh.');location.href=location.pathname;return}
+    if(f.id==='salForm'){const sf=earn.salForm;if(!sf)return;const month=(earn.anchor||today()).slice(0,7);
+      const amt=Math.max(0,Math.round(parseFloat($('#sl-amt').value)||0));if(!(amt>0))throw new Error('Enter the amount paid.');
+      const method=(document.querySelector('input[name=sl-method]:checked')||{}).value||'Cash';
+      const ex=finOf('salary').find(x=>x.data.staff_id===sf.staff_id&&x.data.month===month);
+      await finSave('salary',{staff_id:sf.staff_id,month,amount:amt,status:'paid',paid_on:$('#sl-date').value||today(),method,ref:$('#sl-ref').value.trim()},ex&&ex.id);
+      earn.salForm=null;render();toast('Salary marked as paid – tap Receipt to print');return}
     if(f.id==='expForm'){const x=readExpForm();const amt=Math.round(parseFloat(x.amount)||0);
       if(!(amt>0))throw new Error('Enter the amount.');if(!x.date)throw new Error('Choose the date.');
       if(x.cat==='Materials'&&!x.item)throw new Error('Write the material name.');
@@ -2508,12 +2546,11 @@ document.addEventListener('click',async e=>{
   if(d.staffedit){earn.staffEdit=d.staffedit;earn.staffNew=false;render();return}
   if(d.staffremove){const r=finOf('staff').find(x=>x.id===d.staffremove);if(!r)return;if(!confirm('Remove '+r.data.name+' from staff? Past salary records stay.'))return;
     try{await finSave('staff',Object.assign({},r.data,{active:false}),r.id);earn.staffEdit=null;render();toast('Removed from staff')}catch(err){toast(friendly(err))}return}
-  if(d.salpaid){const r=finOf('staff').find(x=>x.id===d.salpaid);if(!r)return;const month=(earn.anchor||today()).slice(0,7);
-    const ans=prompt('Salary paid to '+r.data.name+' for '+month+' (Rs):',d.amt||'0');if(ans===null)return;const amt=Math.max(0,Math.round(parseFloat(ans)||0));
-    const ex=finOf('salary').find(x=>x.data.staff_id===r.id&&x.data.month===month);
-    try{await finSave('salary',{staff_id:r.id,month,amount:amt,status:'paid',paid_on:today()},ex&&ex.id);render();toast('Marked as paid')}catch(err){toast(friendly(err))}return}
+  if(d.salpaid){earn.salForm={staff_id:d.salpaid,amount:d.amt||''};render();const i=$('#sl-amt');if(i)i.focus();return}
+  if(d.act==='salCancel'){earn.salForm=null;render();return}
+  if(d.salslip){try{await salarySlip(d.salslip)}catch(err){toast(friendly(err))}return}
   if(d.salunpaid){const month=(earn.anchor||today()).slice(0,7);const ex=finOf('salary').find(x=>x.data.staff_id===d.salunpaid&&x.data.month===month);
-    if(ex){try{await finSave('salary',Object.assign({},ex.data,{status:'unpaid',paid_on:''}),ex.id);render();toast('Marked as unpaid')}catch(err){toast(friendly(err))}}return}
+    if(ex){try{await finSave('salary',Object.assign({},ex.data,{status:'unpaid',paid_on:'',method:'',ref:''}),ex.id);render();toast('Marked as unpaid')}catch(err){toast(friendly(err))}}return}
   if(d.askexpdel){view.confirm='expdel:'+d.askexpdel;render();return}
   if(d.expdel){try{await finDel(d.expdel);view.confirm=null;render();toast('Expense deleted')}catch(err){toast(friendly(err))}return}
   if(d.act==='addPast'){const t=view.tooth;if(!t||!p)return;const proc=$('#pt-proc').value,dt=$('#pt-date').value,fee=Math.max(0,Math.round(parseFloat($('#pt-fee').value)||0));

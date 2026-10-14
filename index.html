@@ -540,15 +540,23 @@ html[data-bg=photo] .main{background:linear-gradient(color-mix(in srgb,var(--bg)
 .soundgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
 .aespill{background:#f3e3f7;color:#7a3a8c}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .aespill{background:#3a2442;color:#e6b8f2}}
+.salform{display:flex;flex-direction:column;gap:10px;padding:12px;border:1.5px solid var(--accent);border-radius:12px;background:var(--accent-soft)}
+.salform .chip{cursor:pointer}
+.salform .chip:has(input:checked){border-color:var(--accent);background:var(--paper);color:var(--accent);font-weight:600}
+.salform .chip input{margin:0}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div class="toast" id="toast" hidden></div>
 <script>window.__OWNER_TEST=(function(){try{return sessionStorage.getItem('ownerTest')==='1'}catch(e){return false}})();</script>
-<script src="local-db.js"></script>
+<!-- One page for both versions: if config.js exists (online repository) the app uses Supabase; if not (offline repository) it saves on this device. -->
+<script src="config.js"></script>
+<script>window.__ONLINE=!!(window.CLINIC_CONFIG&&!window.__OWNER_TEST);
+if(window.__ONLINE)document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"><\/script>');
+else document.write('<script src="local-db.js"><\/script>');</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"></script>
 <script src="app.js"></script>
-<script>if('serviceWorker' in navigator&&location.protocol==='https:'||location.hostname==='localhost'){navigator.serviceWorker&&navigator.serviceWorker.register('sw.js').catch(()=>{})}</script>
+<script>if(!window.CLINIC_CONFIG&&'serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost')){navigator.serviceWorker.register('sw.js').catch(()=>{})}</script>
 </body>
 </html>
