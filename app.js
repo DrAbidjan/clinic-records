@@ -1,3 +1,5 @@
+/* Clinic Patient Records – © 2026 Dr Abid Ali, Forensic Odontologist. All rights reserved.
+   Proprietary software: copying, resale, changing or publishing without written permission is not allowed. */
 (function(){
 /* Clinic Patient Records.
    Device version: records stay on the device (local-db.js).
@@ -5,7 +7,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
-const APP_VERSION='14 Oct 2026 · owner tools';
+const APP_VERSION='14 Oct 2026 · commercial release prep';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -464,7 +466,7 @@ async function readImportFile(file){
   try{
     let grid;
     if(/\.xlsx?$/i.test(file.name)){
-      if(!window.XLSX)await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=res;s.onerror=()=>rej(new Error('Excel reader did not load. Check your internet, or save the file as CSV.'));document.head.appendChild(s)});
+      if(!window.XLSX)await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';s.onload=res;s.onerror=()=>rej(new Error('Excel reader did not load. Check your internet, or save the file as CSV.'));document.head.appendChild(s)});
       const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});grid=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:''});
     }else grid=parseCSV(await file.text());
     if(!grid||grid.length<2)throw new Error('The file has no patient rows. The first row must be the column names.');
@@ -607,7 +609,7 @@ function payTab(p){
     <h2>Payment history</h2>
     ${payLoading&&!payList.length?'<div class="empty">Loading…</div>':payList.length?`<div class="tablewrap"><table class="att paytable"><thead><tr><th>Date</th><th>Receipt</th><th>Method</th><th>Amount</th><th>Discount</th><th>Received by</th><th></th></tr></thead><tbody>
       ${[...payList].reverse().map(x=>`<tr><td class="num">${fmtDate(x.paid_on)}</td><td class="num">${receiptNo(x)}</td><td>${esc(x.method)}${x.reference?`<br><span class="small muted">${esc(x.reference)}</span>`:''}</td><td class="num">${money(x.amount)}</td>
-        <td class="num">${+x.discount?money(x.discount)+(x.disc_pct?` <span class="small muted">(${x.disc_pct}%)</span>`:'')+(x.disc_reason?`<br><span class="small muted">${esc(x.disc_reason)}</span>`:''):'–'}</td><td>${esc(x.received_by_name||'')}</td>
+        <td class="num">${+x.discount?money(x.discount)+(x.disc_pct?` <span class="small muted">(${Number(x.disc_pct)||0}%)</span>`:'')+(x.disc_reason?`<br><span class="small muted">${esc(x.disc_reason)}</span>`:''):'–'}</td><td>${esc(x.received_by_name||'')}</td>
         <td><div class="row" style="flex-wrap:nowrap"><button class="btn small" data-payreceipt="${x.id}">Receipt</button>${view.confirm==='paydel:'+x.id?`<button class="btn small" data-act="cancelConfirm">Keep</button><button class="btn small danger" data-paydel="${x.id}">Delete</button>`:(isAdmin()||isAcct()?`<button class="btn small danger" data-askpaydel="${x.id}" aria-label="Delete payment">✕</button>`:'')}</div></td></tr>`).join('')}
     </tbody></table></div>`:'<div class="empty">No payments yet.</div>'}
   </section>`;
@@ -786,7 +788,7 @@ function apptCard(a,showPatient){
   const p=db.patients.find(x=>x.id===a.patient_id);const dn=team.find(t=>t.user_id===a.dentist_id);const st=STATUS_A[a.status]||STATUS_A.scheduled;
   const nm=p?(p.first+' '+p.last):'Patient record deleted';const phone=p&&p.phone;
   const upcoming=a.status==='scheduled'&&new Date(a.starts_at)>new Date(Date.now()-36e5);
-  return `<div class="appt ${a.status}">
+  return `<div class="appt ${esc(a.status)}">
     <div class="tm"><b>${showPatient?hhmm(a.starts_at):fmtDate(dayOf(a.starts_at))}</b><span>${showPatient?a.duration+' min':hhmm(a.starts_at)}</span></div>
     <div class="ai">
       ${showPatient&&p?`<button class="linkbtn pn" data-open="${a.patient_id}">${esc(nm)}</button>`:showPatient?`<b>${esc(nm)}</b>`:''}
@@ -1018,7 +1020,7 @@ function render(){
   if(camStream&&!(view.screen==='patient'&&view.tab==='xrays'))stopCamera();
 }
 const DESIGNER_EMAIL='abid.26.am@gmail.com';
-const CREDIT=`<div class="credit"><div class="credit-qr" title="Scan to email Dr Abid Ali"></div><div class="credit-txt"><span class="credit-by">Made and designed by</span><b>Dr Abid Ali</b><span class="credit-role">Forensic Odontologist</span><span class="credit-scan">Scan the code to email</span></div></div>`;
+const CREDIT=`<div class="credit"><div class="credit-qr" title="Scan to email Dr Abid Ali"></div><div class="credit-txt"><span class="credit-by">Made and designed by</span><b>Dr Abid Ali</b><span class="credit-role">Forensic Odontologist</span><span class="credit-scan">Scan the code to email</span><span class="credit-copy">© 2026 Dr Abid Ali · All rights reserved</span></div></div>`;
 /* QR code with the designer's email, drawn by the qrcodejs library (loaded only when needed). */
 let qrLib=null;
 function fillQR(){
@@ -1222,7 +1224,7 @@ function shell(content){
     <div class="side-foot">
       <div class="side-user"><span class="avatar" style="--h:${hueOf(me.name)}">${esc(ini)}</span><span><b>${esc(me.name)}</b><small>${ROLE_LABEL[me.role]||''}${loginAt?' · since '+hm(loginAt):''}</small></span></div>
       ${syncBadge()}
-      <p class="side-credit">Made and designed by Dr Abid Ali, Forensic Odontologist</p>
+      <p class="side-credit">Made and designed by Dr Abid Ali, Forensic Odontologist<br>© 2026 · All rights reserved</p>
       <p class="side-credit" style="opacity:.75">Version: ${APP_VERSION}</p>
       <div class="row"><button class="side-btn" data-act="toggleSound" aria-pressed="${Sound.on}">${icon(Sound.on?'sound':'mute')}<span>Sound ${Sound.on?'on':'off'}</span></button><button class="side-btn" data-act="logout">${icon('logout')}<span>Log out</span></button></div>
     </div>
@@ -1380,6 +1382,20 @@ function listView(){
   </section>`;
 }
 
+function aboutPanel(){
+  const libs=[['jsPDF 4.2.1','MIT licence','makes the PDF prints'],['QRCode.js 1.0.0','MIT licence','draws the QR code'],['SheetJS Community Edition 0.20.3','Apache 2.0 licence','reads Excel files for import'],
+    ...(LOCAL?[]:[['Supabase JS 2.45.4','MIT licence','connects to the online database']]),['IBM Plex Sans & IBM Plex Mono, Fraunces','SIL Open Font Licence 1.1','fonts (Google Fonts)']];
+  return `<section class="panel"><details><summary><h3 style="display:inline">About, copyright &amp; licences</h3></summary>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px" class="small">
+      <p style="margin:0"><b>Clinic Patient Records</b> · version ${esc(APP_VERSION)}</p>
+      <p style="margin:0">© ${new Date().getFullYear()} Dr Abid Ali, Forensic Odontologist. All rights reserved. The app's design, tooth drawings, charts, texts and program code belong to Dr Abid Ali.</p>
+      <p style="margin:0"><b>Licence:</b> each activation key allows one clinic to use the app. The app may not be copied, resold, given to other clinics, changed or published without written permission from Dr Abid Ali.</p>
+      <p style="margin:0"><b>Patient records</b> entered in the app belong to the clinic that entered them.</p>
+      <p style="margin:0"><b>Open-source parts</b> (their licences allow use in sold software; full notices are in THIRD-PARTY-NOTICES.txt):</p>
+      <ul style="margin:0;padding-left:18px">${libs.map(([n,l,w])=>`<li>${n} – ${l} – ${w}</li>`).join('')}</ul>
+      <p style="margin:0" class="muted">FDI tooth numbering, BPE codes and dental terms are public clinical standards. All drawings in the app were made for this app.</p>
+    </div></details></section>`;
+}
 function settingsView(){
   const admin=isAdmin();const oldLocal=lsGet('clinicRecords.v1');
   return `
@@ -1463,7 +1479,7 @@ function settingsView(){
     <h3>Keeping records safe</h3>
     <p class="small" style="margin:0">Patient records are confidential. Use a strong password, log out on shared computers, and remove dentists who leave the clinic.</p>
     <div class="row"><button class="btn danger" data-act="logout">Log out</button></div>
-  </section>`;
+  </section>${aboutPanel()}`;
 }
 
 function recoveryView(){

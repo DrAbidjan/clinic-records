@@ -1,10 +1,12 @@
+/* Clinic Patient Records – © 2026 Dr Abid Ali, Forensic Odontologist. All rights reserved.
+   Proprietary software: copying, resale, changing or publishing without written permission is not allowed. */
 /* Clinic Patient Records – offline support.
    Keeps a copy of the app on this device so it opens without internet.
    App files: always fetched fresh when online (so updates arrive), saved copy used when offline.
    Libraries and fonts: saved copy used first. */
-const CACHE='clinic-records-v2';
+const CACHE='clinic-records-v3';
 const APP=['./','index.html','app.js','local-db.js'];
-const LIBS=['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js','https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'];
+const LIBS=['https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js','https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE).then(async c=>{
     await c.addAll(APP);
@@ -23,7 +25,7 @@ self.addEventListener('fetch',e=>{
       .catch(()=>caches.match(req,{ignoreSearch:true}).then(r=>r||caches.match('index.html'))));
     return;
   }
-  if(/cdnjs\.cloudflare\.com|fonts\.googleapis\.com|fonts\.gstatic\.com/.test(url.host)){
+  if(/cdnjs\.cloudflare\.com|cdn\.sheetjs\.com|fonts\.googleapis\.com|fonts\.gstatic\.com/.test(url.host)){
     e.respondWith(caches.match(req).then(hit=>hit||fetch(req).then(res=>{if(res.ok||res.type==='opaque'){const copy=res.clone();caches.open(CACHE).then(c=>c.put(req,copy))}return res})));
   }
 });

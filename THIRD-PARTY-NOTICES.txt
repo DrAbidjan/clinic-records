@@ -1,0 +1,55 @@
+Clinic Patient Records – third-party software and licences
+==========================================================
+The app's own code, design and drawings: (c) 2026 Dr Abid Ali. All rights reserved.
+The parts below are made by others. Each licence ALLOWS use in commercial (sold) software.
+The app loads them from public CDNs at run time; it does not change them.
+
+1. jsPDF 4.2.1 – creates the PDF prints (treatment record, invoice, receipt)
+   Source: https://github.com/parallax/jsPDF
+   Loaded from: https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js
+   Licence: MIT. Copyright (c) 2010-2025 James Hall, https://github.com/MrRio/jsPDF;
+            (c) 2015-2025 yWorks GmbH, https://www.yworks.com
+   Requirement: keep the copyright and licence notice (below) with copies.
+
+2. QRCode.js 1.0.0 – draws the QR code with the designer's email
+   Source: https://github.com/davidshimjs/qrcodejs
+   Loaded from: https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js
+   Licence: MIT. Copyright (c) 2012 davidshimjs
+   Requirement: keep the copyright and licence notice (below).
+
+3. SheetJS Community Edition 0.20.3 – reads Excel files when importing old patients
+   Source: https://git.sheetjs.com/sheetjs/sheetjs
+   Loaded from: https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
+   Licence: Apache License 2.0. Copyright (C) 2012-present SheetJS LLC
+   Requirement: give users a copy of the Apache 2.0 licence (https://www.apache.org/licenses/LICENSE-2.0),
+   keep its copyright/NOTICE text, and do not use the SheetJS name to promote this app.
+
+4. Supabase JS client 2.45.4 – online version only; talks to the Supabase database
+   Source: https://github.com/supabase/supabase-js
+   Loaded from: https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js
+   Licence: MIT. Copyright (c) 2020 Supabase
+   Requirement: keep the copyright and licence notice (below).
+
+5. Fonts: IBM Plex Sans, IBM Plex Mono (Copyright IBM Corp.) and Fraunces (Copyright The Fraunces Project Authors)
+   Loaded from: Google Fonts (fonts.googleapis.com / fonts.gstatic.com)
+   Licence: SIL Open Font License 1.1 – free for commercial use; fonts may not be sold on their own.
+
+MIT licence text (applies to items 1, 2 and 4, each with its own copyright line above)
+-----------------------------------------------------------------------------------
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Not used: no paid libraries, no paid APIs, no images, icons, logos or text copied from other products.
+All tooth drawings, icons and screens were drawn for this app.

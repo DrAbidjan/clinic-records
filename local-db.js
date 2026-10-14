@@ -1,3 +1,5 @@
+/* Clinic Patient Records – © 2026 Dr Abid Ali, Forensic Odontologist. All rights reserved.
+   Proprietary software: copying, resale, changing or publishing without written permission is not allowed. */
 /* Clinic Patient Records – on-device storage.
    Keeps all records, logins and X-ray images in this browser's IndexedDB.
    It offers the same small set of calls the app used with Supabase, so the app works unchanged. */

@@ -1,0 +1,23 @@
+Clinic Patient Records
+Copyright (c) 2026 Dr Abid Ali, Forensic Odontologist. All rights reserved.
+
+This software (program code, design, tooth drawings, charts and texts) is the
+property of Dr Abid Ali. It is licensed, not sold.
+
+A clinic that buys an activation key may use the software for that one clinic.
+Without written permission from Dr Abid Ali, nobody may:
+  - copy, download for reuse, or host this software elsewhere;
+  - sell, rent, give or share it with other clinics or people;
+  - change it, translate it or build other software from it;
+  - remove or hide the copyright notice or the designer credit.
+
+Patient records entered into the software belong to the clinic that entered them.
+
+Open-source parts used by the software keep their own licences; see
+THIRD-PARTY-NOTICES.txt (jsPDF – MIT, QRCode.js – MIT, SheetJS CE – Apache 2.0,
+Supabase JS – MIT, IBM Plex and Fraunces fonts – SIL OFL 1.1).
+
+THE SOFTWARE IS PROVIDED WITHOUT WARRANTY. Clinics are responsible for keeping
+their own backups. (Final sale terms: see the clinic licence agreement.)
+
+Contact: WhatsApp 03113124533
