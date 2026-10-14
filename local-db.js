@@ -2,7 +2,7 @@
    Keeps all records, logins and X-ray images in this browser's IndexedDB.
    It offers the same small set of calls the app used with Supabase, so the app works unchanged. */
 (function(){
-const DBN='clinic-records-local';
+const DBN=window.__OWNER_TEST?'clinic-owner-test':'clinic-records-local';
 /* Licensing: 14-day free trial per clinic, then read-only until a signed activation key is entered.
    Keys are made in the seller's private Key Maker; this public key can only check them, not make them. */
 const LICENSE_PUBLIC_KEY={"kty":"EC","crv":"P-256","x":"6oT1-oIwFPO46SyzpmkPyQ_-_JAQPYNdoW8GbCkdnsA","y":"wnk5D2jCyZHtri9GETUavj9HL4hhV7pYIHULdxtKN1c"};
@@ -45,6 +45,7 @@ async function verifyKey(key){
 }
 const clinicCode=c=>{const h=String(c.id).replace(/-/g,'').slice(0,10).toUpperCase();return h.slice(0,5)+'-'+h.slice(5)};
 function licenceOf(c){
+  if(window.__OWNER_TEST)return{state:'active',name:'Owner test clinic',date:''};
   if(c.license){const p=verified[String(c.license).replace(/\s+/g,'')];if(p&&p.t!=='del'&&p.c===clinicCode(c).replace('-',''))return{state:'active',name:p.n,date:p.d}}
   const left=Math.ceil((new Date(c.created_at).getTime()+TRIAL_DAYS*864e5-Date.now())/864e5);
   return left>0?{state:'trial',daysLeft:left}:{state:'expired'};
@@ -200,7 +201,8 @@ const auth={
     if(!u||await hash(String(password||''),u.salt)!==u.hash)return{data:{},error:err('Invalid login credentials')};
     await setSession(u);return{data:{user:clone(session.user),session:clone(session)},error:null}},
   signOut:async()=>{await ready;await setSession(null);listeners.forEach(f=>{try{f('SIGNED_OUT',null)}catch(e){}});return{error:null}},
-  updateUser:async({password})=>{await ready;if(!session)return{data:{},error:err('Please log in again.')};
+  updateUser:async({password,data})=>{await ready;if(!session)return{data:{},error:err('Please log in again.')};
+    if(data&&password===undefined){const u=T.users.find(x=>x.id===session.user.id);u.meta=Object.assign({},u.meta||{},data);await saveT('users');await setSession(u);return{data:{user:clone(session.user)},error:null}}
     if(String(password||'').length<8)return{data:{},error:err('Password should be at least 8 characters')};
     const u=T.users.find(x=>x.id===session.user.id);u.salt=hex(crypto.getRandomValues(new Uint8Array(16)));u.hash=await hash(password,u.salt);await saveT('users');
     return{data:{user:clone(session.user)},error:null}},

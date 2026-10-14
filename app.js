@@ -5,7 +5,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
-const APP_VERSION='13 Oct 2026 · wide chart + BPE';
+const APP_VERSION='14 Oct 2026 · owner tools';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -20,7 +20,8 @@ const fmtTime=t=>{if(!t)return '';const d=new Date(t);return fmtDate(d.getFullYe
 const money=n=>'Rs '+Math.round(Number(n)||0).toLocaleString('en-US');
 const age=dob=>{if(!dob)return '';const b=new Date(dob),n=new Date();let a=n.getFullYear()-b.getFullYear();if(n<new Date(n.getFullYear(),b.getMonth(),b.getDate()))a--;return a};
 /* Online and offline apps can live on the same website address, so each keeps its own small settings. */
-const LS_NS=window.__LOCAL_DB?'offline:':'';
+const OWNER_TEST=!!window.__OWNER_TEST;
+const LS_NS=OWNER_TEST?'ownertest:':window.__LOCAL_DB?'offline:':'';
 const lsGet=k=>{try{return localStorage.getItem(LS_NS+k)}catch(e){return null}};
 const lsSet=(k,v)=>{try{localStorage.setItem(LS_NS+k,v)}catch(e){}};
 
@@ -291,14 +292,15 @@ async function boot(){
   recovering=/type=recovery/.test(location.hash);
   sb.auth.onAuthStateChange((ev,s)=>{
     if(ev==='PASSWORD_RECOVERY'){recovering=true;user=s&&s.user;view.screen='newpw';render();}
-    else if(ev==='SIGNED_OUT'){resetState();view.screen='auth';render();}
+    else if(ev==='SIGNED_OUT'){if(OWNER_TEST){sessionStorage.removeItem('ownerTest');location.reload();return}resetState();view.screen='auth';render();}
   });
+  if(OWNER_TEST){try{await ownerAutoLogin()}catch(e){sessionStorage.removeItem('ownerTest');alert('Owner test mode could not start: '+(e.message||e));location.reload()}return}
   const {data:{session}}=await sb.auth.getSession();
   if(recovering){if(session){user=session.user;view.screen='newpw';render()}return}
   if(!session){view.screen='auth';render();return}
   user=session.user;await afterLogin();
 }
-function resetState(){if(chan&&sb)sb.removeChannel(chan);chan=null;user=null;memberships=[];clinic=null;me=null;team=[];db={patients:[]};dirty.clear();setSync('saved')}
+function resetState(){earn.unlockedAt=0;earn.pays=null;earn.mode='';earn.err='';if(chan&&sb)sb.removeChannel(chan);chan=null;user=null;memberships=[];clinic=null;me=null;team=[];db={patients:[]};dirty.clear();setSync('saved')}
 function normClinic(c){
   if(!c||LOCAL)return c;
   c.clinic_code=String(c.id).replace(/-/g,'').slice(0,10).toUpperCase().replace(/^(.{5})/,'$1-');
@@ -522,7 +524,10 @@ function importPanel(){
   return `<section class="panel imp">
     <div class="row"><h2>Add patients from old records</h2><span class="spacer"></span><button class="btn small" data-act="impClose">Close</button></div>
     <div class="seg" role="tablist"><button class="${view.impMode!=='file'?'on':''}" data-impmode="hand" role="tab">Type in by hand</button><button class="${view.impMode==='file'?'on':''}" data-impmode="file" role="tab">Import Excel / CSV</button></div>
-    ${view.impMode!=='file'?oldHandForm():`
+    ${view.impMode!=='file'?`<div class="paperstart">
+      <p style="margin:0">Write the old paper file into the app <b>exactly like a new patient</b>: details, medical history, chart, past treatments (RCT, scaling, fillings…) with their dates, and past payments.</p>
+      <p class="small muted" style="margin:0">A small guide stays at the top while you work. When you tap <b>Finished</b>, the patient becomes a normal patient and the past treatments show in the history.</p>
+      <div class="row"><button class="btn primary" data-act="paperPatient">Start – write in an old patient</button></div></div>`:`
     <p class="small muted" style="margin:0">Import your old patient list from Excel or a CSV file. The first row must contain column names such as <b>Name</b>, <b>Mobile</b>, <b>CNIC</b>, <b>File no.</b>, <b>Date of birth</b> or <b>Age</b>, <b>First visit</b>, <b>Medical history</b>, <b>Past treatment</b> and <b>Balance</b>. Columns can be in any order.</p>
     <div class="row"><button class="btn small" data-act="impTemplate">${icon('doc')} Get the template (CSV)</button>
       <label class="btn primary filebtn">Choose Excel or CSV file<input type="file" id="imp-file" accept=".csv,.xlsx,.xls,text/csv"></label></div>
@@ -745,7 +750,7 @@ async function refreshAppts(){
   }catch(e){toast(friendly(e))}
   apptsLoading=false;softRender();
 }
-function homeNav(active){return `<nav class="tabs homenav desk-hide" role="tablist"><button class="tab" role="tab" aria-selected="${active==='list'}" data-home="list">Patients</button><button class="tab" role="tab" aria-selected="${active==='appts'}" data-home="appts">Appointments</button><button class="tab" role="tab" aria-selected="${active==='msgs'}" data-home="msgs">Messages${unreadCount()?' ('+unreadCount()+')':''}</button></nav>`}
+function homeNav(active){return `<nav class="tabs homenav desk-hide" role="tablist"><button class="tab" role="tab" aria-selected="${active==='list'}" data-home="list">Patients</button><button class="tab" role="tab" aria-selected="${active==='appts'}" data-home="appts">Appointments</button><button class="tab" role="tab" aria-selected="${active==='msgs'}" data-home="msgs">Messages${unreadCount()?' ('+unreadCount()+')':''}</button>${isAdmin()?`<button class="tab" role="tab" aria-selected="${active==='earn'}" data-home="earn">Earnings</button>`:''}</nav>`}
 /* Team messages on this device: "patient arrived" notes and messages between staff. */
 let msgs=[];
 async function loadMessages(){if(!clinic)return;const {data}=await sb.from('messages').select('*').eq('clinic_id',clinic.id).order('created_at');msgs=(data||[]).slice(-300)}
@@ -1004,9 +1009,9 @@ function mhStatus(p){
 /* ---------- screens ---------- */
 function render(){
   const app=$('#app');const s=view.screen;
-  const v={config:configView,offline:offlineView,loading:loadingView,error:errorView,auth:authView,newpw:newpwView,onboard:onboardView,recovery:recoveryView,welcome:welcomeView,list:listView,appts:apptsView,msgs:msgsView,settings:settingsView,patient:patientView}[s]||loadingView;
-  const inShell=['list','appts','msgs','settings','patient'].includes(s)&&clinic&&me;
-  app.innerHTML=inShell?shell(v()):`<div class="wrap">${v()}${['auth','onboard','newpw','recovery','config'].includes(s)?CREDIT:''}</div>`;
+  const v={config:configView,offline:offlineView,loading:loadingView,error:errorView,auth:authView,newpw:newpwView,onboard:onboardView,recovery:recoveryView,welcome:welcomeView,list:listView,appts:apptsView,msgs:msgsView,settings:settingsView,patient:patientView,earn:earningsView,owner:ownerView}[s]||loadingView;
+  const inShell=['list','appts','msgs','settings','patient','earn'].includes(s)&&clinic&&me;
+  app.innerHTML=inShell?shell(ownerBar()+v()):`<div class="wrap">${v()}${['auth','onboard','newpw','recovery','config'].includes(s)?CREDIT:''}${s==='auth'?'<p class="ownerlink"><button class="linkbtn" data-act="ownerOpen">Owner access</button></p>':''}</div>`;
   if(view.screen==='msgs'){const cl=document.getElementById('chatList');if(cl)cl.scrollTop=cl.scrollHeight}
   if(document.querySelector('.credit-qr'))fillQR();
   const cv=document.getElementById('camVideo');if(cv&&camStream&&cv.srcObject!==camStream){cv.srcObject=camStream;cv.play().catch(()=>{})}
@@ -1023,8 +1028,184 @@ function fillQR(){
   if(!qrLib)qrLib=new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)});
   qrLib.then(draw,()=>boxes.forEach(b=>b.remove()));
 }
+/* ---- Clinic earnings (admin only, password protected) ---- */
+let earn={pays:null,loading:false,err:'',unlockedAt:0,period:'month',anchor:null,busy:false,mode:'',tries:0};
+const EARN_LOCK_MIN=10;
+const earnOpen=()=>isAdmin()&&earn.unlockedAt&&Date.now()-earn.unlockedAt<EARN_LOCK_MIN*60e3;
+const isoD=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*6e4);return x.toISOString().slice(0,10)};
+const parseD=s=>{const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
+function earnRange(period,anchor){
+  const a=parseD(anchor);let f,t;
+  if(period==='day'){f=t=a}
+  else if(period==='week'){const wd=(a.getDay()+6)%7;f=new Date(a);f.setDate(a.getDate()-wd);t=new Date(f);t.setDate(f.getDate()+6)}
+  else if(period==='month'){f=new Date(a.getFullYear(),a.getMonth(),1);t=new Date(a.getFullYear(),a.getMonth()+1,0)}
+  else {f=new Date(a.getFullYear(),0,1);t=new Date(a.getFullYear(),11,31)}
+  return [isoD(f),isoD(t)];
+}
+function earnShift(dir){
+  if(!dir){earn.anchor=today();return}
+  const a=parseD(earn.anchor||today());
+  if(earn.period==='day')a.setDate(a.getDate()+dir);else if(earn.period==='week')a.setDate(a.getDate()+7*dir);
+  else if(earn.period==='month'){a.setDate(1);a.setMonth(a.getMonth()+dir)}else a.setFullYear(a.getFullYear()+dir);
+  earn.anchor=isoD(a);
+}
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function earnTitle(f,t){const F=parseD(f),T=parseD(t);
+  if(earn.period==='day')return F.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  if(earn.period==='week')return `${F.getDate()} ${MONTHS[F.getMonth()]} – ${T.getDate()} ${MONTHS[T.getMonth()]} ${T.getFullYear()}`;
+  if(earn.period==='month')return F.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+  return String(F.getFullYear());
+}
+async function loadEarn(){
+  earn.loading=true;earn.err='';softRender();
+  try{const {data,error}=await sb.from('payments').select('*').eq('clinic_id',clinic.id);if(error)throw error;earn.pays=data||[]}
+  catch(e){earn.err=friendly(e)}
+  earn.loading=false;softRender();
+}
+const patName=id=>{const p=db.patients.find(x=>x.id===id);return p?((p.first||'')+' '+(p.last||'')).trim()||'Unnamed':'(deleted patient)'};
+function earnData(){
+  const [f,t]=earnRange(earn.period,earn.anchor||today());const inR=d=>d&&d>=f&&d<=t;
+  const pays=(earn.pays||[]).filter(x=>inR(String(x.paid_on).slice(0,10))).sort((a,b)=>(b.paid_on+b.created_at).localeCompare(a.paid_on+a.created_at));
+  const received=pays.reduce((a,x)=>a+(+x.amount||0),0),disc=pays.reduce((a,x)=>a+(+x.discount||0),0);
+  const byMethod={},byStaff={};pays.forEach(x=>{const m=x.method||'Other';byMethod[m]=(byMethod[m]||0)+(+x.amount||0);const s=x.received_by_name||'Not recorded';byStaff[s]=(byStaff[s]||0)+(+x.amount||0)});
+  const done=[];db.patients.forEach(p=>(p.plan||[]).forEach(i=>{if(i.status==='completed'&&inR(i.doneDate)&&!/^Previous balance/.test(i.proc||''))done.push({p,i})}));
+  const treatVal=done.reduce((a,x)=>a+(+x.i.fee||0),0);
+  const byProc={},byDent={};done.forEach(({i})=>{const k=(i.proc||'Other').split(' – ')[0];const o=byProc[k]||(byProc[k]={n:0,v:0});o.n++;o.v+=+i.fee||0;const d=i.doneBy||'Not recorded';byDent[d]=(byDent[d]||0)+(+i.fee||0)});
+  // bars
+  let bars=[];
+  if(earn.period==='week'||earn.period==='month'){const F=parseD(f),T=parseD(t);for(let d=new Date(F);d<=T;d.setDate(d.getDate()+1)){const k=isoD(d);bars.push({k,l:earn.period==='week'?d.toLocaleDateString('en-GB',{weekday:'short'}):String(d.getDate()),v:0})}
+    const idx=Object.fromEntries(bars.map((b,i)=>[b.k,i]));pays.forEach(x=>{const i=idx[String(x.paid_on).slice(0,10)];if(i!==undefined)bars[i].v+=+x.amount||0})}
+  else if(earn.period==='year'){bars=MONTHS.map((l,i)=>({k:i,l,v:0}));pays.forEach(x=>{bars[+String(x.paid_on).slice(5,7)-1].v+=+x.amount||0})}
+  // all-time money still owed by patients
+  const allPaid={};(earn.pays||[]).forEach(x=>{allPaid[x.patient_id]=(allPaid[x.patient_id]||0)+(+x.amount||0)+(+x.discount||0)});
+  let owed=0;db.patients.forEach(p=>{const ch=(p.plan||[]).filter(i=>i.status==='completed').reduce((a,i)=>a+(+i.fee||0),0);const b=ch-(allPaid[p.id]||0);if(b>0)owed+=b});
+  return {f,t,pays,received,disc,byMethod,byStaff,done,treatVal,byProc,byDent,bars,owed,patients:new Set(pays.map(x=>x.patient_id)).size};
+}
+function earningsView(){
+  if(!isAdmin())return `${homeNav('earn')}<section class="panel"><h2>Clinic earnings</h2><p class="muted">Only the clinic admin can see earnings.</p></section>`;
+  if(!earnOpen())return `${homeNav('earn')}<h1>Earnings</h1>${earnLockView()}`;
+  if(!earn.anchor)earn.anchor=today();
+  if(earn.pays===null||earn.loading)return `${homeNav('earn')}<h1>Earnings</h1><section class="panel"><p class="muted">${earn.err?esc(earn.err):'Loading payments…'}</p></section>`;
+  const D=earnData();const max=Math.max(1,...D.bars.map(b=>b.v));
+  const list=(o,total)=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="erow"><span>${esc(k)}</span><span class="ebar"><i style="width:${total?Math.round(v/total*100):0}%"></i></span><b>${money(v)}</b></div>`).join('')||'<p class="small muted" style="margin:0">Nothing in this period.</p>';
+  return `${homeNav('earn')}
+  <div class="row" style="gap:10px;flex-wrap:wrap"><h1 style="margin:0">Earnings</h1><span class="spacer"></span>
+    <button class="btn small" data-act="earnCsv">Download list (Excel/CSV)</button><button class="btn small" data-act="earnLock">${icon('lock')} Lock</button></div>
+  <section class="panel">
+    <div class="row" style="gap:10px;flex-wrap:wrap">
+      <div class="seg" role="radiogroup" aria-label="Period">${[['day','Daily'],['week','Weekly'],['month','Monthly'],['year','Yearly']].map(([k,l])=>`<button type="button" class="${earn.period===k?'on':''}" data-earnper="${k}" role="radio" aria-checked="${earn.period===k}">${l}</button>`).join('')}</div>
+      <span class="spacer"></span>
+      <div class="row" style="gap:6px"><button class="btn small" data-earnnav="-1" aria-label="Previous">‹</button><b class="eperiod">${esc(earnTitle(D.f,D.t))}</b><button class="btn small" data-earnnav="1" aria-label="Next">›</button><button class="btn small" data-earnnav="0">Today</button></div>
+    </div>
+    <div class="paysum esum">
+      <div><span>Money received</span><b>${money(D.received)}</b><small>${D.pays.length} payment${D.pays.length===1?'':'s'} · ${D.patients} patient${D.patients===1?'':'s'}</small></div>
+      <div><span>Treatment done (value)</span><b>${money(D.treatVal)}</b><small>${D.done.length} treatment${D.done.length===1?'':'s'} completed</small></div>
+      <div><span>Discounts given</span><b>${money(D.disc)}</b><small>in this period</small></div>
+      <div class="warn"><span>Still owed by patients</span><b>${money(D.owed)}</b><small>all patients, up to now</small></div>
+    </div>
+    ${D.bars.length?`<div class="echart" role="img" aria-label="Money received per ${earn.period==='year'?'month':'day'}">${D.bars.map(b=>`<div class="ecol" title="${esc(b.l)}: ${money(b.v)}"><span class="eval">${b.v?money(b.v).replace('Rs ',''):''}</span><i style="height:${Math.round(b.v/max*100)}%"></i><em>${esc(b.l)}</em></div>`).join('')}</div>`:''}
+  </section>
+  <section class="panel"><div class="row"><h3 style="margin:0">Earnings by treatment</h3><span class="spacer"></span><span class="small muted">treatments marked as done in this period</span></div>
+    ${Object.keys(D.byProc).length?`<div class="tablewrap"><table class="att etreat"><thead><tr><th>Treatment</th><th style="text-align:right">How many</th><th style="text-align:right">Earned</th><th style="width:30%">Share</th></tr></thead><tbody>
+    ${Object.entries(D.byProc).sort((a,b)=>b[1].v-a[1].v).map(([k,o])=>`<tr><td>${esc(k)}</td><td style="text-align:right">${o.n}</td><td style="text-align:right"><b>${money(o.v)}</b></td><td><span class="ebar"><i style="width:${D.treatVal?Math.round(o.v/D.treatVal*100):0}%"></i></span> <small class="muted">${D.treatVal?Math.round(o.v/D.treatVal*100):0}%</small></td></tr>`).join('')}
+    </tbody><tfoot><tr><th>Total – all treatments</th><th style="text-align:right">${D.done.length}</th><th style="text-align:right">${money(D.treatVal)}</th><th></th></tr></tfoot></table></div>`:'<p class="muted" style="margin:0">No treatment marked as done in this period.</p>'}
+  </section>
+  <div class="grid2 egrid">
+    <section class="panel"><h3>Received by payment method</h3>${list(D.byMethod,D.received)}</section>
+    <section class="panel"><h3>Received by staff</h3>${list(D.byStaff,D.received)}</section>
+    <section class="panel"><h3>Treatment value by dentist</h3>${list(D.byDent,D.treatVal)}</section>
+  </div>
+  <section class="panel"><h3>Payments in this period</h3>
+    ${D.pays.length?`<div class="tablewrap"><table class="att"><thead><tr><th>Date</th><th>Patient</th><th>Method</th><th style="text-align:right">Amount</th><th style="text-align:right">Discount</th><th>Received by</th></tr></thead><tbody>
+    ${D.pays.slice(0,300).map(x=>`<tr><td>${fmtDate(x.paid_on)}</td><td><button class="linkbtn" data-open="${x.patient_id}">${esc(patName(x.patient_id))}</button></td><td>${esc(x.method||'')}${x.reference?` <small class="muted">${esc(x.reference)}</small>`:''}</td><td style="text-align:right">${money(x.amount)}</td><td style="text-align:right">${+x.discount?money(x.discount):'–'}</td><td>${esc(x.received_by_name||'')}</td></tr>`).join('')}
+    </tbody></table></div>${D.pays.length>300?'<p class="small muted">Showing the latest 300. Download the list for all.</p>':''}`:'<p class="muted" style="margin:0">No payments in this period.</p>'}
+  </section>`;
+}
+function earnCsv(){
+  const D=earnData();const q=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const rows=[['Date','Patient','Method','Reference','Amount (Rs)','Discount (Rs)','Received by','Note'].map(q).join(',')]
+    .concat(D.pays.map(x=>[fmtDate(x.paid_on),patName(x.patient_id),x.method,x.reference,+x.amount||0,+x.discount||0,x.received_by_name,x.note].map(q).join(',')));
+  rows.push('',[q('Total received'),'','','',D.received,D.disc].join(','));
+  const blob=new Blob(['﻿'+rows.join('\r\n')],{type:'text/csv'});
+  deliverFile(blob,('Earnings_'+clinic.name+'_'+D.f+'_to_'+D.t+'.csv').replace(/[^\w.\-]+/g,'_'),'save');
+}
+/* Earnings PIN: 4–6 digits, kept (hashed) on the admin's own account, set with the login password. */
+async function pinHash(pin,salt){
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(String(pin)),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:new TextEncoder().encode(salt),iterations:120000,hash:'SHA-256'},key,256);
+  return [...new Uint8Array(bits)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+const myPin=()=>((user&&user.user_metadata)||{}).earn_pin||null;
+function earnLockView(){
+  const has=myPin()&&earn.mode!=='set';
+  if(!has)return `<section class="panel earnlock">
+    <div class="lockicon" aria-hidden="true">${icon('lock')}</div>
+    <h2>${myPin()?'Change earnings PIN':'Set an earnings PIN'}</h2>
+    <p class="muted">Choose a 4 to 6 digit number. You'll type it each time you open Earnings. Only you, the admin, can open it.</p>
+    <form id="earnSetPin" style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px">
+      <label class="f"><span>Your login password (to confirm it's you)</span><input type="password" id="ep-pw" autocomplete="current-password" required></label>
+      <label class="f"><span>New PIN (4–6 numbers)</span><input type="password" id="ep-new" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6" autocomplete="off" required></label>
+      <label class="f"><span>Type the PIN again</span><input type="password" id="ep-new2" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6" autocomplete="off" required></label>
+      ${earn.err?`<p class="msg err" role="alert">${esc(earn.err)}</p>`:''}
+      <button class="btn primary" type="submit" ${earn.busy?'disabled':''}>${earn.busy?'Saving…':'Save PIN and open'}</button>
+      ${myPin()?'<button class="btn" type="button" data-act="earnCancelSet">Cancel</button>':''}
+    </form>
+  </section>`;
+  return `<section class="panel earnlock">
+    <div class="lockicon" aria-hidden="true">${icon('lock')}</div>
+    <h2>Enter earnings PIN</h2>
+    <form id="earnLock" style="display:flex;flex-direction:column;gap:12px;align-items:center;width:100%;max-width:280px">
+      <input type="password" id="earn-pin" class="pinbox" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" aria-label="PIN" placeholder="••••" required>
+      <div class="pinpad">${['1','2','3','4','5','6','7','8','9','del','0','ok'].map(k=>`<button type="${k==='ok'?'submit':'button'}" ${k==='ok'?'':`data-pinkey="${k}"`} class="${k==='ok'?'ok':''}" aria-label="${k==='del'?'Delete':k==='ok'?'Open':k}">${k==='del'?'⌫':k==='ok'?'OK':k}</button>`).join('')}</div>
+      ${earn.err?`<p class="msg err" role="alert" style="width:100%">${esc(earn.err)}</p>`:''}
+    </form>
+    <button class="linkbtn small" data-act="earnForgot">Forgot PIN? Set a new one with your login password</button>
+    <p class="small muted" style="margin:0">Locks again after ${EARN_LOCK_MIN} minutes and when you log out.</p>
+  </section>`;
+}
+/* ---- Owner access (Dr Abid Ali): test the app in a separate practice clinic, and erase test data ---- */
+const OWNER={s:'76a972ad678f15f59e027e54',h:'143ada41876d838834c3e207daee9b5e166fc9df5e89aaa52be8358b5200af21'};
+async function ownerHash(code){
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(String(code)),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:new TextEncoder().encode(OWNER.s),iterations:200000,hash:'SHA-256'},key,256);
+  return [...new Uint8Array(bits)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function ownerView(){
+  if(!view.ownerOk)return `<div class="auth">${brand()}<section class="panel earnlock">
+    <div class="lockicon" aria-hidden="true">${icon('lock')}</div>
+    <h2>Owner access</h2><p class="muted" style="margin:0">For the app owner only. Enter your 8-digit owner code.</p>
+    <form id="ownerForm" style="display:flex;flex-direction:column;gap:12px;align-items:center;width:100%;max-width:280px">
+      <input type="password" id="own-code" class="pinbox" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" aria-label="Owner code" placeholder="••••••••" required>
+      <div class="pinpad">${['1','2','3','4','5','6','7','8','9','del','0','ok'].map(k=>`<button type="${k==='ok'?'submit':'button'}" ${k==='ok'?'':`data-pinkey="${k}"`} class="${k==='ok'?'ok':''}" aria-label="${k==='del'?'Delete':k==='ok'?'Open':k}">${k==='del'?'⌫':k==='ok'?'OK':k}</button>`).join('')}</div>
+      ${view.ownerErr?`<p class="msg err" role="alert" style="width:100%">${esc(view.ownerErr)}</p>`:''}
+    </form>
+    <button class="linkbtn" data-act="ownerBack">← Back to login</button></section></div>`;
+  return `<div class="auth">${brand()}<section class="panel" style="display:flex;flex-direction:column;gap:12px">
+    <h2 style="margin:0">Owner tools</h2>
+    <div class="ownercard"><b>Test the app without making a clinic</b>
+      <p class="small muted" style="margin:0">Opens a ready-made <b>Owner Test Clinic</b> with example patients. Everything works with no trial limit. Its data is kept apart from real clinics, and you can reset it any time.</p>
+      <button class="btn primary" data-act="ownerTest">Open owner test clinic</button></div>
+    ${LOCAL&&!OWNER_TEST?`<div class="ownercard danger"><b>Erase all clinics on this device</b>
+      <p class="small muted" style="margin:0">Deletes every clinic, login, patient, payment and X-ray saved in this browser (offline version), so the app starts fresh. This cannot be undone.</p>
+      <form id="ownerErase" style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="own-erase" placeholder="Type ERASE" autocomplete="off" style="flex:1;min-width:140px"><button class="btn danger" type="submit">Erase everything</button></form></div>`
+    :!LOCAL?`<div class="ownercard"><b>Delete a test clinic in the online version</b>
+      <p class="small muted" style="margin:0">Log in as that clinic's admin → <b>Clinic & account</b> → <b>Delete clinic</b>. Make the deletion code in your Key Maker (Online mode) with the clinic code shown there.</p></div>`:''}
+    <button class="linkbtn" data-act="ownerBack">← Back to login</button></section></div>`;
+}
+const ownerBar=()=>OWNER_TEST?`<div class="ownerbar" role="status"><b>OWNER TEST MODE</b><span>Practice clinic for testing only – kept apart from real clinics</span><span class="spacer"></span><button class="btn small" data-act="ownerReset">Reset test data</button><button class="btn small" data-act="ownerExit">Exit test mode</button></div>`:'';
+async function ownerAutoLogin(){
+  const ld=window.__LOCAL_DB;await ld.ready;
+  let pw=lsGet('ownerPw');
+  if(ld.userCount()>0&&pw){const r=await sb.auth.signInWithPassword({email:'owner',password:pw});if(!r.error){user=r.data.user;await afterLogin();return}}
+  if(ld.userCount()>0)await ld.wipeAll();
+  pw=[...crypto.getRandomValues(new Uint8Array(12))].map(x=>x.toString(16).padStart(2,'0')).join('');lsSet('ownerPw',pw);
+  const r=await sb.auth.signUp({email:'owner',password:pw,options:{data:{full_name:'Dr Abid Ali',pmdc:''}}});if(r.error)throw r.error;user=r.data.user;
+  const c=await sb.rpc('create_clinic',{p_name:'Owner Test Clinic',p_address:'Testing only',p_phone:'',p_my_name:'Dr Abid Ali'});if(c.error)throw c.error;
+  await afterLogin(c.data);
+  const np=sample();np.notes[0].by=me.name;db.patients.push(np);markDirty(np.id);await flush();render();
+}
 function shell(content){
-  const s=view.screen,active=s==='appts'?'appts':s==='msgs'?'msgs':s==='settings'?'settings':'list';const un=unreadCount();
+  const s=view.screen,active=s==='appts'?'appts':s==='msgs'?'msgs':s==='settings'?'settings':s==='earn'?'earn':'list';const un=unreadCount();
   const lic=clinic.lic;const ini=(me.name||'?').replace(/^Dr\.?\s*/i,'').trim().slice(0,1).toUpperCase();
   return `<div class="shell">
   <aside class="sidebar" aria-label="Main menu">
@@ -1035,6 +1216,7 @@ function shell(content){
       <button class="${active==='list'?'on':''}" data-home="list">${icon('people')}<span>Patients</span><em>${db.patients.length}</em></button>
       <button class="${active==='appts'?'on':''}" data-home="appts">${icon('calendar')}<span>Appointments</span></button>
       <button class="${active==='msgs'?'on':''}" data-home="msgs">${icon('chat')}<span>Messages</span>${un?`<em class="badge">${un}</em>`:''}</button>
+      ${isAdmin()?`<button class="${active==='earn'?'on':''}" data-home="earn">${icon('money')}<span>Earnings</span>${earnOpen()?'':`<em class="lockmark" title="PIN protected">${icon('lock')}</em>`}</button>`:''}
       <button class="${active==='settings'?'on':''}" data-act="settings">${icon('gear')}<span>Clinic &amp; account</span></button>
     </nav>
     <div class="side-foot">
@@ -1098,7 +1280,9 @@ function icon(n){const p={
   doc:'<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/>',
   chat:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   camera:'<path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
-  logout:'<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4M6 12h10"/>'}[n]||'';
+  logout:'<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4M6 12h10"/>',
+  lock:'<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.3"/>',
+  money:'<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.8"/><path d="M6.5 9.5v5M17.5 9.5v5"/>'}[n]||'';
   return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`}
 const msgHtml=()=>view.msg?`<div class="msg ${view.msg.t}" role="alert">${esc(view.msg.m)}</div>`:'';
 const brand=()=>`<div class="brand"><svg viewBox="0 0 100 100" aria-hidden="true"><polygon points="4,4 96,4 68,32 32,32" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="5"/><polygon points="4,96 96,96 68,68 32,68" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="5"/><polygon points="4,4 32,32 32,68 4,96" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="5"/><polygon points="96,4 68,32 68,68 96,96" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="5"/><rect x="32" y="32" width="36" height="36" fill="var(--accent)"/></svg><div><b>Clinic Patient Records</b><span>Dental records for your clinic</span></div></div>`;
@@ -1306,7 +1490,7 @@ function welcomeView(){
     ${CREDIT}
   </div>`;
 }
-function deviceBanner(){
+function deviceBanner(){if(OWNER_TEST)return '';
   const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
   const standalone=navigator.standalone||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
   const last=+lsGet('lastFullBackup')||0,old=!last||Date.now()-last>7*864e5;let h='';
@@ -1380,6 +1564,19 @@ function localBackupHtml(admin){
     ${view.confirm==='restore'?`<div class="confirm">Replace ALL records on this device with the backup of ${esc(view.restoreInfo||'')}? Everyone is logged out afterwards.<span class="spacer"></span><button class="btn small" data-act="cancelConfirm">Cancel</button><button class="btn small danger" data-act="doRestore">Replace</button></div>`:''}
   </section>`;
 }
+function paperGuide(p){
+  const done=p.plan.filter(i=>i.status==='completed').length;
+  const steps=[['details','1','Details','Name, mobile, old file no. and first visit date',!!(p.first||'').trim()],
+    ['mh','2','Medical history','As written in the file',!!(p.mh&&p.mh.date)],
+    ['chart','3','Chart','Teeth as found at the last visit',Object.keys(p.chart||{}).length+Object.keys(p.surf||{}).length>0],
+    ['plan','4','Past treatments','Add each one (RCT, scaling…) with its date in "Done on"',done>0],
+    ['pay','5','Past payments','With the date they were paid',false],
+    ['xrays','6','Photo of the file','Optional – save the paper as "Old record (scan)"',false]];
+  return `<section class="paperguide" aria-label="Old patient guide">
+    <div class="row"><b>Writing in an old patient from paper</b><span class="spacer"></span><button class="btn small primary" data-act="paperDone">✓ Finished – make normal patient</button></div>
+    <div class="pgsteps">${steps.map(([t,n,l,h,ok])=>`<button class="pgstep ${view.tab===t?'on':''} ${ok?'ok':''}" data-tab="${t}"><em>${ok?'✓':n}</em><span><b>${l}</b><small>${h}</small></span></button>`).join('')}</div>
+  </section>`;
+}
 function patientView(){
   const p=P();if(!p){view.screen='list';return listView();}
   migrate(p);
@@ -1391,6 +1588,7 @@ function patientView(){
   <header class="top"><button class="btn small" data-act="back">← Patients</button>${syncBadge()}</header>
   ${p.example?'<span class="note-ex">Example record – delete it once you add real patients</span>':''}
   ${isAcct()?'<span class="note-ex" style="color:var(--accent);background:var(--accent-soft)">Accountant view: you can see, print and save records and book appointments. Clinical changes are made by dentists.</span>':''}
+  ${p.paperEntry?paperGuide(p):''}
   <div class="banner">
     <div class="row"><span class="nm">${esc(p.first)} ${esc(p.last)}</span><span class="spacer"></span><span class="small muted">${p.dob?fmtDate(p.dob)+' · '+age(p.dob)+' yrs':''}</span></div>
     <div class="alerts">${al.map(a=>`<span class="pill alert">⚠ ${esc(a)}</span>`).join('')}<span class="pill ${ms.cls}">${ms.t}</span></div>
@@ -1404,7 +1602,7 @@ function patientView(){
 function fld(id,label,val,type='text',extra=''){return `<label class="f"><span>${label}</span><input type="${type}" data-f="${id}" id="f-${id}" value="${esc(val)}" ${extra}></label>`}
 function detailsTab(p){
   const isNew=!p.oldFile&&!p.since&&p.notes.length===0&&p.plan.length===0;
-  return `${isNew?`<div class="msg ok">Adding a patient from your old records? Fill in <b>Old records</b> below, then add past treatment in the <b>Treatment plan</b> with "Already done on", and photograph the old file in <b>X-rays</b> as "Old record (scan)".</div>`:''}
+  return `${isNew&&!p.paperEntry?`<div class="msg ok">Adding a patient from your old records? Fill in <b>Old records</b> below, then add past treatment in the <b>Treatment plan</b> with "Already done on", and photograph the old file in <b>X-rays</b> as "Old record (scan)".</div>`:''}
   <section class="panel">
     <h3>Personal details</h3>
     <div class="grid2">${fld('first','First name',p.first)}${fld('last','Surname / family name',p.last)}${fld('dob','Date of birth',p.dob,'date')}
@@ -1509,8 +1707,100 @@ function sideView(p,n,big){
   if(isUpper(n))scene=`<g transform="matrix(1 0 0 -1 0 100)">${scene}</g>`;
   return `<svg viewBox="0 0 100 100" aria-hidden="true" class="sideview">${defs}<clipPath id="${id}"><rect x="2" y="2" width="96" height="96" rx="10"/></clipPath><g clip-path="url(#${id})">${scene}</g><rect x="2" y="2" width="96" height="96" rx="10" fill="none" stroke="var(--t-${{partial:'pe',impacted:'imp',unerupted:'ue',root:'rr'}[st]})" stroke-width="${big?2.5:5}" ${st==='impacted'||st==='partial'?'stroke-dasharray="8 6"':st==='unerupted'?'stroke-dasharray="3 6" stroke-linecap="round"':''}/></svg>`;
 }
-function toothSVG(p,n,big){
-  if(!big&&SIDE_ST.includes(p.chart[n]))return sideView(p,n,false);
+// ---- natural-looking tooth (buccal view) in gum and bone, like German practice software ----
+const NAT={
+  molar:{crown:'M25 42C21 36 18 28 19 20C19.5 14 22 10 26 8.5Q31 6.5 35 9Q39 4.5 45 7Q50 9.5 54 6.5Q60 4.5 64 8Q68 5.5 73 8C78 10.5 81 15 81 21C82 29 79 36 75 42Q50 46 25 42Z',
+    root:'M27 40Q50 44 73 40C73 52 71 62 68 72C66 82 64 90 60 95Q56.5 97 56 91C56 80 55 68 51 60L49 60C45 68 44 80 44 91Q43.5 97 40 95C36 90 34 82 32 72C29 62 27 52 27 40Z',
+    up:'M27 40Q50 44 73 40C74 52 74 64 71 75Q69 84 64 89Q60.5 90.5 61 85C62 73 60 63 55 57L45 57C40 63 38 73 39 85Q39.5 90.5 36 89C31 84 29 76 28 68C27 58 27 50 27 40Z',
+    pal:'M41 44C40 60 43 78 50 94C57 78 60 60 59 44Z',
+    detail:'M50 8.5Q50.6 16 49.6 25M35 9.5Q37 15 39 19M64 8.5Q63 14 61 18',x:[19,81],cej:42},
+  premolar:{crown:'M30 42C26 34 25 24 28 17C30 11 35 8 41 6Q46 3 50 2Q54 3 59 6C65 8 70 11 72 17C75 24 74 34 70 42Q50 46 30 42Z',
+    root:'M32 40Q50 44 68 40C67 56 62 74 54 93Q50 98 46 93C38 74 33 56 32 40Z',
+    detail:'M50 3Q50.5 12 50 24',x:[26,74],cej:42},
+  canine:{crown:'M32 43C28 34 28 24 32 17C36 11 43 6 50 1C57 6 64 11 68 17C72 24 72 34 68 43Q50 47 32 43Z',
+    root:'M34 41Q50 45 66 41C65 60 60 80 53 98Q50 101 47 98C40 80 35 60 34 41Z',
+    detail:'M50 2Q51 14 50 30',x:[28,72],cej:43},
+  incisor:{crown:'M33 43C30 33 31 20 33 9Q34 4 39 3.5Q50 2.5 61 3.5Q66 4 67 9C69 20 70 33 67 43Q50 47 33 43Z',
+    root:'M35 41Q50 45 65 41C64 58 59 76 53 94Q50 97 47 94C41 76 36 58 35 41Z',
+    detail:'M44 4.5V11M56 4.5V11',x:[31,69],cej:43}};
+function chartStyle(){return lsGet('chartStyle')==='simple'?'simple':'natural'}
+function naturalSVG(p,n,big){
+  const st=p.chart[n]||'',type=toothType(n),N=NAT[type],T=TOOTH[type],sf=p.surf[n]||{};
+  const id='nt'+n+(big?'B':'s');const mr=[1,4,5,8].includes(Math.floor(n/10));const up=isUpper(n);
+  const [xl,xr]=N.x,w=xr-xl,top=type==='canine'?4:6,cej=N.cej;
+  const ink='#6e5c46',sw=big?1:1.6;
+  const mat=(p.pros||{})[n];const mfill=MAT_FILL[mat];
+  const rootPath=up&&type==='molar'?N.up:N.root;
+  const defs=`<defs><linearGradient id="${id}e" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#e4dfd3"/><stop offset=".3" stop-color="#fffefb"/><stop offset=".7" stop-color="#f6f2ea"/><stop offset="1" stop-color="#d3ccbd"/></linearGradient>`
+    +`<linearGradient id="${id}v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".0"/><stop offset=".75" stop-color="#e8dcc0" stop-opacity=".0"/><stop offset="1" stop-color="#e3cf9f" stop-opacity=".55"/></linearGradient>`
+    +`<linearGradient id="${id}d" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#cdb582"/><stop offset=".45" stop-color="#efe1bd"/><stop offset="1" stop-color="#c2a872"/></linearGradient>`
+    +`<linearGradient id="${id}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a7b0"/><stop offset=".55" stop-color="#ec919d"/><stop offset="1" stop-color="#d9707f"/></linearGradient>`
+    +`<linearGradient id="${id}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#efd9b0"/><stop offset="1" stop-color="#d8b583"/></linearGradient>`
+    +`<pattern id="${id}t" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M1 2.5q1.5-1.5 3 0t3 0M3 6.5q1.5-1.5 3 0" fill="none" stroke="#b48a55" stroke-width=".55" opacity=".55"/><circle cx="6.5" cy="3" r=".7" fill="#b48a55" opacity=".35"/></pattern>`
+    +`<pattern id="${id}s" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".45" fill="#c45f6f" opacity=".35"/><circle cx="3" cy="3" r=".35" fill="#c45f6f" opacity=".3"/></pattern>`
+    +`<clipPath id="${id}c"><path d="${N.crown}"/></clipPath><clipPath id="${id}k"><rect x="-50" y="${cej+2}" width="200" height="200"/></clipPath><clipPath id="${id}w"><rect x="8" y="-6" width="84" height="108"/></clipPath></defs>`;
+  // surfaces painted on the crown: O/I = biting edge, M/D = sides, B = face, L = cervical band
+  const mx=mr?[xr-w*.24,xr+2]:[xl-2,xl+w*.24],dx=mr?[xl-2,xl+w*.24]:[xr-w*.24,xr+2];
+  const reg={O:[xl-2,top-6,w+4,12],M:[mx[0],top+6,mx[1]-mx[0],cej-top],D:[dx[0],top+6,dx[1]-dx[0],cej-top],B:[xl+w*.24,top+6,w*.52,(cej-top)*.62],L:[xl+w*.24,top+6+(cej-top)*.62,w*.52,cej]};
+  let paint='';for(const k in reg){const v=sf[k];if(!v)continue;const [x,y,ww,hh]=reg[k];
+    paint+=`<rect x="${x}" y="${y}" width="${ww}" height="${hh}" rx="3" fill="var(${surfColor(v)})" opacity="${v.t==='fill'?.92:.85}"/>`;
+    if(v.t==='caries'||v.t==='sec')paint+=`<circle cx="${x+ww/2}" cy="${y+hh/2}" r="${Math.min(ww,hh)/4}" fill="#3a2a22" opacity=".45"/>`}
+  const root=(o={})=>(up&&type==='molar'?`<path d="${N.pal}" fill="#e6d6ad" stroke="${ink}" stroke-width="${sw*.8}" opacity=".85"/>`:'')
+    +`<path d="${rootPath}" fill="${o.fill||`url(#${id}d)`}" stroke="${ink}" stroke-width="${sw}" stroke-linejoin="round"/>`
+    +(type==='molar'&&!o.fill?`<path d="M50 ${cej+4}V${cej+14}" stroke="#b39a66" stroke-width="${sw}" opacity=".6"/>`:'');
+  const crown=(fill,stroke,sw2)=>`<path d="${N.crown}" fill="${fill||`url(#${id}e)`}" stroke="${stroke||ink}" stroke-width="${sw2||sw}" stroke-linejoin="round"/>`;
+  const shine=`<path d="M${xl+w*.18} ${top+10}Q${xl+w*.2} ${(top+cej)/2} ${xl+w*.28} ${cej-7}" fill="none" stroke="#fff" stroke-width="${big?2:2.8}" stroke-linecap="round" opacity=".9"/>`;
+  const detail=`<path d="${N.detail}" fill="none" stroke="#bfb6a3" stroke-width="${big?.7:1.1}" stroke-linecap="round" opacity=".8"/>`;
+  const canals=`<path d="${T.pulp}" fill="var(--t-rct)" opacity=".9" clip-path="url(#${id}k)"/>`;
+  const natural=()=>root()+crown()+`<path d="${N.crown}" fill="url(#${id}v)"/>`+detail+`<g clip-path="url(#${id}c)">${paint}</g>`+shine;
+  const cap=(stroke)=>crown(mfill?mfill:'#f2efe8',stroke,big?2:3.2)+(mat==='PFM'?`<path d="M${xl+2} ${cej-3}Q50 ${cej+1} ${xr-2} ${cej-3}" stroke="#7d868c" stroke-width="${big?2:3}" fill="none"/>`:'')+shine;
+  const rct=p.rct&&p.rct[n];
+  let g='',extra='',screwOnly=false;
+  if(st==='missing'||st==='ext'&&false)g='';
+  else if(st==='crown'||st==='abut')g=root()+(rct?canals:'')+cap(st==='crown'?'var(--t-crown)':'var(--t-bridge)');
+  else if(st==='bridge')g=cap('var(--t-bridge)');
+  else if(st==='implant'){const yb=cej+1;g=`<rect x="42" y="${yb}" width="16" height="${92-yb}" rx="5" fill="#a3abb0" stroke="#5f686d" stroke-width="${sw}"/>`
+      +Array.from({length:Math.floor((88-yb)/6)},(_,i)=>`<path d="M40.5 ${yb+6+i*6}L59.5 ${yb+8.5+i*6}" stroke="#5f686d" stroke-width="${big?1.2:2}" stroke-linecap="round"/>`).join('')
+      +crown(mfill||'#f4f2ec','var(--t-implant)',big?2:3)+shine;}
+  else if(st==='veneer')g=natural()+`<rect x="${xl+w*.1}" y="${top+3}" width="${w*.8}" height="${cej-top-5}" rx="6" fill="${mfill||'#f8f2e6'}" opacity=".85" stroke="var(--t-ven)" stroke-width="${big?1.5:2.4}" clip-path="url(#${id}c)"/>`;
+  else if(st==='root'){const y=cej+3;g=`<g clip-path="url(#${id}k)">${root()}</g>`
+      +`<path d="M${xl+5} ${y}L${xl+w*.25} ${y-6}L${xl+w*.42} ${y}L50 ${y-7}L${xr-w*.4} ${y}L${xr-w*.22} ${y-5}L${xr-5} ${y}Z" fill="#9c7448" stroke="${ink}" stroke-width="${sw}" stroke-linejoin="round"/>`;}
+  else g=natural();
+  if(rct&&!['implant','missing','bridge'].includes(st)&&st!=='crown'&&st!=='abut')g+=canals;
+  if(st==='frac')extra+=`<polyline points="${xl+6},${top+4} ${xl+w*.55},${top+16} ${xl+w*.35},${top+24} ${xr-6},${cej-2}" fill="none" stroke="var(--t-frac)" stroke-width="${big?2.5:4}" stroke-linejoin="round"/>`;
+  if(st==='ext')extra+=`<path d="M22 14L78 88M78 14L22 88" stroke="var(--t-ext)" stroke-width="${big?3:5}" stroke-linecap="round"/>`;
+  if(!big&&(st==='abut'||st==='bridge')){const isB=x=>x&&['abut','bridge'].includes(p.chart[x]);const [l,r]=neighbours(n);
+    extra+=`<path d="M${isB(l)?-10:xl+6} ${top+15}H${isB(r)?110:xr-6}" stroke="var(--t-bridge)" stroke-width="5" stroke-linecap="round"/>`}
+  // where the tooth sits
+  let tf='';const imp=(p.imp||{})[n]||{};const buried=['unerupted','impacted'].includes(st);
+  if(st==='partial')tf='translate(0 14)';
+  else if(st==='unerupted')tf='translate(50 76) scale(.6) translate(-50 -45)';
+  else if(st==='impacted'){const a=(ANG_DEG[imp.ang]||0)*(mr?1:-1);const h=Math.abs(a)===90;tf=`translate(50 ${h?78:76}) rotate(${a}) scale(${h?.5:.58}) translate(-50 -45)`;}
+  const flat=st==='missing'||buried||st==='bridge';
+  // gingiva: scalloped margin hugging the neck, papillae between teeth; healed flat ridge where no tooth
+  const m=st==='partial'?cej+5:cej+2;// margin level
+  const gTop=flat?`M8 ${cej-4}Q50 ${cej-7} 92 ${cej-4}`:`M8 ${m-11}C14 ${m-10} ${xl-1} ${m-7} ${xl+3} ${m-3}Q50 ${m+3} ${xr-3} ${m-3}C${xr+1} ${m-7} 86 ${m-10} 92 ${m-10}`;
+  const crestY=cej+5;
+  const gBot=`V${crestY+9}Q50 ${crestY+12} 8 ${crestY+9}Z`;
+  const gum=`<path d="${gTop}${gBot}" fill="url(#${id}g)"/><path d="${gTop}${gBot}" fill="url(#${id}s)"/>`
+    +`<path d="${gTop}" fill="none" stroke="#d26a79" stroke-width="${big?.9:1.3}" stroke-linecap="round"/>`
+    +`<path d="M8 ${crestY+9}Q50 ${crestY+12} 92 ${crestY+9}" fill="none" stroke="#c45c6c" stroke-width="${big?.8:1.2}" opacity=".7"/>`;
+  // alveolar bone: crest follows the neck, interdental septa higher; trabecular texture; root visible through a thin cortical plate
+  const crest=flat?`M8 ${crestY-2}Q50 ${crestY-4} 92 ${crestY-2}`:`M8 ${crestY-4}C${xl-4} ${crestY-4} ${xl+2} ${crestY} ${xl+6} ${crestY+2}Q50 ${crestY+6} ${xr-6} ${crestY+2}C${xr-2} ${crestY} ${xr+4} ${crestY-4} 92 ${crestY-4}`;
+  const boneArea=`${crest}V112H8Z`;
+  const boneBack=`<path d="${boneArea}" fill="url(#${id}b)"/><path d="${boneArea}" fill="url(#${id}t)"/>`;
+  const boneOver=`<path d="${boneArea}" fill="url(#${id}b)" opacity="${buried?.5:.3}"/><path d="${boneArea}" fill="url(#${id}t)" opacity=".6"/>`
+    +`<path d="${crest}" fill="none" stroke="#fbf0d9" stroke-width="${big?1:1.6}"/>`;
+  const follicle=buried?`<g transform="${tf}"><ellipse cx="50" cy="${top+16}" rx="${w/2+6}" ry="22" fill="#3a2a1c" opacity=".2"/></g>`:'';
+  // outline of the root drawn again faintly so it reads "inside the bone"
+  const ghost=g&&!['bridge','missing'].includes(st)?`<g ${tf?`transform="${tf}"`:''} clip-path="url(#${id}k)"><path d="${st==='implant'?'M42 44H58V92H42Z':rootPath}" fill="none" stroke="#7a6347" stroke-width="${sw*.9}" opacity=".55"/></g>`:'';
+  let body=`<g clip-path="url(#${id}w)"><rect x="8" y="-6" width="84" height="${cej-4}" fill="none"/>${boneBack}${follicle}<g ${tf?`transform="${tf}"`:''}>${g}</g>${boneOver}${ghost}${gum}</g>${extra}`;
+  if(up)body=`<g transform="matrix(1 0 0 -1 0 98)">${body}</g>`;
+  const outline={impacted:'var(--t-imp)',partial:'var(--t-pe)',unerupted:'var(--t-ue)'}[st];
+  return `<svg class="nat" viewBox="10 -4 80 104" aria-hidden="true">${defs}${body}${outline?`<rect x="11" y="-3" width="78" height="102" rx="8" fill="none" stroke="${outline}" stroke-width="${big?1.5:2.5}" stroke-dasharray="${st==='unerupted'?'2 5':'7 5'}" stroke-linecap="round"/>`:''}${st==='missing'?`<path d="M30 ${up?70:28}L70 ${up?30:68}M70 ${up?70:28}L30 ${up?30:68}" stroke="var(--t-missing)" stroke-width="${big?2.5:4}" stroke-linecap="round" opacity=".7"/>`:''}</svg>`;
+}
+function toothSVG(p,n,big,noSide){
+  if(!big&&!noSide&&SIDE_ST.includes(p.chart[n]))return sideView(p,n,false);
   const sf=p.surf[n]||{},st=p.chart[n]||'',map=surfMap(n);
   const polys={top:'4,4 96,4 68,32 32,32',bottom:'4,96 96,96 68,68 32,68',left:'4,4 32,32 32,68 4,96',right:'96,4 68,32 68,68 96,96',center:'32,32 68,32 68,68 32,68'};
   const lp={top:[50,19],bottom:[50,86],left:[17,53],right:[83,53],center:[50,53]};
@@ -1568,7 +1858,7 @@ function toothBtn(p,n,lower){
   const st=ST[p.chart[n]||'']||ST[''];const imp=(p.imp||{})[n]||{};
   const code=[st.de,PROS_ST.includes(p.chart[n])&&p.pros&&p.pros[n]?p.pros[n]:'',(p.chart[n]==='impacted'||p.chart[n]==='partial')&&imp.ang?ANG_SHORT[imp.ang]:'',p.rct[n]?'RCT':'',p.mob&&p.mob[n]?'M'+({I:1,II:2,III:3}[p.mob[n]]||''):''].filter(Boolean).join(' ');
   const sum=summaryOf(p,n).map(x=>x.s+' '+x.txt).join(', ');
-  return `<button class="tooth ${lower?'lo':''} ${isPrim(n)?'prim':''} ${view.tooth===n?'sel':''}" data-tooth="${n}" aria-label="Tooth ${n}: ${st.label}${impText(p,n)}${prosText(p,n)}${p.rct[n]?', root canal treated':''}${sum?', '+sum:''}"><span>${n}</span>${toothSVG(p,n,false)}${toothHasXray(n)?'<i class="xr-dot" title="Has X-ray"></i>':''}<span class="code">${esc(code)||(p.toothNotes[n]?'•':'')}</span></button>`;
+  return `<button class="tooth ${chartStyle()==='natural'?'natv':''} ${lower?'lo':''} ${isPrim(n)?'prim':''} ${view.tooth===n?'sel':''}" data-tooth="${n}" aria-label="Tooth ${n}: ${st.label}${impText(p,n)}${prosText(p,n)}${p.rct[n]?', root canal treated':''}${sum?', '+sum:''}"><span>${n}</span>${chartStyle()==='natural'?naturalSVG(p,n,false)+'<span class="sq">'+toothSVG(p,n,false,true)+'</span>':toothSVG(p,n,false)}${toothHasXray(n)?'<i class="xr-dot" title="Has X-ray"></i>':''}<span class="code">${esc(code)||(p.toothNotes[n]?'•':'')}</span></button>`;
 }
 function editor(p,t,mode,mat,sum){
   const cur=p.chart[t]||'';
@@ -1618,7 +1908,8 @@ function chartTab(p){
   const sum=t?summaryOf(p,t):[];
   return `<div class="chartlay"><section class="panel">
     <div class="row"><h2>Dental chart</h2><span class="spacer"></span>
-      <div class="seg" role="radiogroup" aria-label="Dentition">${Object.entries(DENT).map(([k,l])=>`<button type="button" class="${dent===k?'on':''}" data-dent="${k}" role="radio" aria-checked="${dent===k}">${l}</button>`).join('')}</div></div>
+      <div class="seg" role="radiogroup" aria-label="Dentition">${Object.entries(DENT).map(([k,l])=>`<button type="button" class="${dent===k?'on':''}" data-dent="${k}" role="radio" aria-checked="${dent===k}">${l}</button>`).join('')}</div>
+      <div class="seg" role="radiogroup" aria-label="Chart style">${[['natural','Natural teeth'],['simple','Simple']].map(([k,l])=>`<button type="button" class="${chartStyle()===k?'on':''}" data-cstyle="${k}" role="radio" aria-checked="${chartStyle()===k}">${l}</button>`).join('')}</div></div>
     <p class="small muted" style="margin:0">${p.dent?'':(p.dob?'Chosen from the patient\'s age ('+age(p.dob)+' yrs). ':'')}FDI numbering · tap a tooth to chart it.</p>
     <div class="opg"><div class="opg-in ${dent==='prim'?'prim-only':''}">
       <span class="side" style="${sideL}">Upper right · Q${dent==='prim'?5:1}</span><span></span><span class="side r" style="${sideR}">Upper left · Q${dent==='prim'?6:2}</span>
@@ -1636,7 +1927,16 @@ function chartTab(p){
     <label class="f" style="max-width:220px"><span>Recorded on</span><input type="date" data-bpedate id="bpe-date" value="${esc(p.bpeDate)}"></label>
   </section></div>`;
 }
-function planTab(p){
+function planTab(p){return planTabMain(p)+historyPanel(p)}
+function historyPanel(p){
+  const h=p.plan.filter(i=>i.status==='completed').sort((a,b)=>String(b.doneDate||'').localeCompare(String(a.doneDate||'')));
+  if(!h.length)return '';
+  return `<section class="panel"><div class="row"><h2>Treatment history</h2><span class="spacer"></span><span class="small muted">${h.length} treatment${h.length===1?'':'s'} done · newest first</span></div>
+    <div class="tablewrap"><table class="att hist"><thead><tr><th>Date done</th><th>Tooth</th><th>Treatment</th><th style="text-align:right">Fee</th><th>By</th></tr></thead><tbody>
+    ${h.map(i=>`<tr><td><b>${i.doneDate?fmtDate(i.doneDate):'–'}</b></td><td>${esc(i.tooth||'–')}</td><td>${esc(i.proc)}${i.surf?` <small class="muted">${esc(i.surf)}</small>`:''}</td><td style="text-align:right">${money(i.fee)}</td><td>${esc(i.doneBy||'')}</td></tr>`).join('')}
+    </tbody></table></div></section>`;
+}
+function planTabMain(p){
   const tot=p.plan.reduce((a,i)=>a+(+i.fee||0),0),done=p.plan.filter(i=>i.status==='completed').reduce((a,i)=>a+(+i.fee||0),0);
   const form=view.addItem;
   return `<section class="panel">
@@ -1670,7 +1970,7 @@ function itemForm(f){
       <label class="f"><span>Phase</span><select id="it-phase">${PHASES.map(([n,l])=>`<option value="${n}" ${+f.phase===n?'selected':''}>${n} · ${l}</option>`).join('')}</select></label>
       <label class="f"><span>Fee (Rs)</span><input type="number" inputmode="numeric" id="it-fee" value="${esc(f.fee)}" min="0" step="1"></label>
     </div>
-    <label class="f" style="max-width:280px"><span>Already done on (for old or past treatment)</span><input type="date" id="it-done" value="${esc(f.status==='completed'?(f.doneDate||''):'')}" max="${today()}"></label>
+    <label class="f" style="max-width:280px"><span>${(P()||{}).paperEntry?'<b>Done on</b> – the date written in the paper file':'Already done on (for old or past treatment)'}</span><input type="date" id="it-done" value="${esc(f.status==='completed'?(f.doneDate||''):'')}" max="${today()}"></label>
     <div class="row"><button class="btn primary" data-act="saveItem">Save item</button><button class="btn" data-act="cancelItem">Cancel</button></div>
   </div>`;
 }
@@ -1703,6 +2003,30 @@ document.addEventListener('submit',async e=>{
   e.preventDefault();const f=e.target;const v=id=>($('#'+id)?$('#'+id).value.trim():'');
   view.msg=null;busy(f,true);
   try{
+    if(f.id==='ownerForm'){const c=$('#own-code').value.trim();view.ownerTries=(view.ownerTries||0)+1;
+      if(view.ownerTries>8){view.ownerErr='Too many tries. Reload the page to try again.';render();return}
+      if(/^\d{8}$/.test(c)&&await ownerHash(c)===OWNER.h){view.ownerOk=true;view.ownerErr='';view.ownerTries=0;render()}
+      else{view.ownerErr='Wrong owner code.';render();const i=$('#own-code');if(i){i.value='';i.focus()}}
+      return}
+    if(f.id==='ownerErase'){if(!view.ownerOk||!LOCAL||OWNER_TEST)return;if(v('own-erase')!=='ERASE')throw new Error('Type ERASE in capital letters to confirm.');
+      await window.__LOCAL_DB.wipeAll();try{Object.keys(localStorage).filter(k=>k.startsWith('offline:')).forEach(k=>localStorage.removeItem(k))}catch(e){}
+      alert('All clinics on this device were erased. The app will start fresh.');location.href=location.pathname;return}
+    if(f.id==='earnLock'){const pin=$('#earn-pin').value.trim();const mp=myPin();
+      if(!mp){earn.mode='set';render();return}
+      if(earn.tries>=5){earn.err='Too many wrong tries. Set a new PIN with your login password.';earn.mode='set';earn.tries=0;render();return}
+      if(await pinHash(pin,mp.s)===mp.h){earn.unlockedAt=Date.now();earn.err='';earn.tries=0;Sound.play&&Sound.play('success');render();loadEarn()}
+      else{earn.tries++;earn.err='Wrong PIN. Try again.';render();const i=$('#earn-pin');if(i)i.focus()}
+      return}
+    if(f.id==='earnSetPin'){const pw=$('#ep-pw').value,a=$('#ep-new').value.trim(),b2=$('#ep-new2').value.trim();
+      if(!/^\d{4,6}$/.test(a)){earn.err='The PIN must be 4 to 6 numbers.';render();return}
+      if(a!==b2){earn.err='The two PINs are not the same.';render();return}
+      earn.busy=true;earn.err='';render();
+      try{const r=await sb.auth.signInWithPassword({email:user.email,password:pw});if(r.error)throw new Error('Wrong login password.');
+        const salt=[...crypto.getRandomValues(new Uint8Array(12))].map(x=>x.toString(16).padStart(2,'0')).join('');
+        const {data,error}=await sb.auth.updateUser({data:{earn_pin:{s:salt,h:await pinHash(a,salt)}}});if(error)throw error;
+        if(data&&data.user)user=data.user;earn.mode='';earn.unlockedAt=Date.now();earn.busy=false;toast('Earnings PIN saved');render();loadEarn()}
+      catch(e2){earn.busy=false;earn.err=e2.message==='Wrong login password.'?e2.message:friendly(e2);render()}
+      return}
     if(f.id==='loginForm'){
       view.email=v('li-email');
       if(!v('li-email')||!$('#li-pw').value)throw new Error('Enter your email and password.');
@@ -1824,8 +2148,21 @@ document.addEventListener('click',async e=>{
     save();render();return}
   const b=e.target.closest('button');if(!b)return;
   const p=P(),d=b.dataset;
+  if(d.pinkey){const i=$('#earn-pin')||$('#own-code');if(i){i.value=d.pinkey==='del'?i.value.slice(0,-1):(i.value+d.pinkey).slice(0,i.maxLength>0?i.maxLength:6);i.focus()}return}
+  if(d.earnper){earn.period=d.earnper;render();return}
+  if(d.earnnav!==undefined){earnShift(+d.earnnav);render();return}
+  if(d.act==='earnCsv'){earnCsv();return}
+  if(d.act==='ownerOpen'){view.screen='owner';view.ownerOk=false;view.ownerErr='';render();const i=$('#own-code');if(i)i.focus();return}
+  if(d.act==='ownerBack'){view.screen='auth';view.ownerOk=false;render();return}
+  if(d.act==='ownerTest'){if(!view.ownerOk)return;try{sessionStorage.setItem('ownerTest','1')}catch(e){}location.href=location.pathname;return}
+  if(d.act==='ownerExit'){try{sessionStorage.removeItem('ownerTest')}catch(e){}location.href=location.pathname;return}
+  if(d.act==='ownerReset'){if(!OWNER_TEST)return;if(!confirm('Delete all test data and start the test clinic fresh?'))return;await window.__LOCAL_DB.wipeAll();lsSet('ownerPw','');location.reload();return}
+  if(d.act==='earnLock'){earn.unlockedAt=0;earn.pays=null;render();return}
+  if(d.act==='earnForgot'){earn.mode='set';earn.err='';render();return}
+  if(d.act==='earnCancelSet'){earn.mode='';earn.err='';render();return}
   if(d.home){stopXrWatch();stopCamera();view=Object.assign(view,{screen:d.home,pid:null,confirm:null,msg:null});
     if(d.home==='appts'){view.day=view.day||today();apptsDay=[];render();refreshAppts();}
+    else if(d.home==='earn'){earn.err='';earn.mode='';render();if(earnOpen())loadEarn();else{const i=$('#earn-pin')||$('#ep-pw');if(i)i.focus()}}
     else if(d.home==='msgs'){await loadMessages();try{await loadDay(today())}catch(e){}view.day=view.day||today();render();const hadUnread=unreadCount();await markRead();if(hadUnread)render();const cl=$('#chatList');if(cl)cl.scrollTop=cl.scrollHeight;}
     else render();return}
   if(d.month){view.month=d.month;await loadMonth(d.month);render();return}
@@ -1861,6 +2198,7 @@ document.addEventListener('click',async e=>{
   if(d.tooth){view.tooth=+d.tooth===view.tooth?null:+d.tooth;view.confirm=null;render();const ed=$('#editor');if(ed)ed.scrollIntoView({block:'nearest'});return}
   if(d.mode){view.mode=d.mode;render();return}
   if(d.pros){const t=view.tooth;if(p.pros[t]===d.pros)delete p.pros[t];else p.pros[t]=d.pros;save();render();return}
+  if(d.cstyle){lsSet('chartStyle',d.cstyle);render();return}
   if(d.dent){p.dent=d.dent;view.tooth=null;save();render();return}
   if(d.mat){view.mat=d.mat;if(view.mode!=='sec')view.mode='fill';render();return}
   if(d.setst!==undefined){if(d.setst)p.chart[view.tooth]=d.setst;else delete p.chart[view.tooth];save();render();return}
@@ -1938,6 +2276,8 @@ document.addEventListener('click',async e=>{
       view=Object.assign(view,{screen:memberships.length?'list':'onboard',pid:null,tab:'details',tooth:null,confirm:null,addItem:null,msg:null});render();break;
     case 'settings':view.newRecovery=null;if(isAdmin()||isAcct()){attRows=null;loadAttendance(attDay||today()).then(()=>{if(view.screen==='settings')softRender()})}if(LOCAL){snapList=null;window.__LOCAL_DB.listSnapshots().then(l=>{snapList=l;if(view.screen==='settings')softRender()})}view.screen='settings';view.confirm=null;view.msg=null;render();loadTeam().then(()=>{if(view.screen==='settings')softRender()});break;
     case 'onboard':view.screen='onboard';view.msg=null;render();break;
+    case 'paperPatient':{const np=blankPatient();np.paperEntry=true;db.patients.push(np);markDirty(np.id);view.impOpen=false;view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
+    case 'paperDone':{const p=P();if(!p)break;if(!(p.first||'').trim()){toast('Write the patient\'s name first.');view.tab='details';render();break}delete p.paperEntry;save();render();toast('Saved – now a normal patient');break;}
     case 'newPatient':{const np=blankPatient();db.patients.push(np);markDirty(np.id);view=Object.assign(view,{screen:'patient',pid:np.id,tab:'details',tooth:null,q:'',confirm:null});render();const f=$('#f-first');if(f){f.focus();f.select()}break;}
     case 'example':{const np=sample();np.notes[0].by=me.name;db.patients.push(np);markDirty(np.id);render();toast('Example patient added');break;}
     case 'askDelete':if(isAcct()){toast('Only dentists can delete patient records.');break;}view.confirm='delete';render();break;

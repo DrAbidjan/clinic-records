@@ -436,14 +436,70 @@ table.att td.num{font-variant-numeric:tabular-nums}
   .bpepanel .f{max-width:none!important}
   .tooth svg{max-width:52px}
 }
+.tooth.natv{gap:1px;padding:2px 0}
+.tooth.natv svg.nat{max-width:50px}
+.tooth.natv .sq{display:flex;justify-content:center;width:100%}
+.tooth.natv .sq svg{max-width:26px}
+.tooth.natv.prim svg.nat{max-width:40px}
+.tooth.natv.prim .sq svg{max-width:22px}
+@media (min-width:1180px){.tooth.natv svg.nat{max-width:58px}.tooth.natv .sq svg{max-width:30px}}
+/* earnings */
+.earnlock{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;max-width:460px;margin:0 auto;width:100%}
+.lockicon{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}
+.lockicon .ic{width:30px;height:30px}
+.pinbox{text-align:center;font-size:1.6rem;letter-spacing:.5em;font-family:var(--f-mono);padding:10px;width:100%}
+.pinpad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%}
+.pinpad button{min-height:54px;border-radius:14px;border:1.5px solid var(--line);background:var(--paper);font-size:1.35rem;font-weight:600;font-family:var(--f-mono);color:var(--ink)}
+.pinpad button:active{background:var(--accent-soft)}
+.pinpad button.ok{background:var(--accent);border-color:var(--accent);color:#fff;font-size:1.05rem}
+.lockmark{background:none!important;color:var(--side-mute)!important;padding:0!important}
+.lockmark .ic{width:14px;height:14px}
+.eperiod{min-width:170px;text-align:center}
+.esum{margin-top:12px}
+.esum>div.warn b{color:var(--warn)}
+.esum small{font-size:.72rem;color:var(--muted)}
+.echart{display:flex;align-items:flex-end;gap:3px;height:190px;margin-top:14px;padding-top:18px;border-bottom:1px solid var(--line)}
+.ecol{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;position:relative}
+.ecol i{display:block;width:100%;max-width:34px;background:var(--accent);border-radius:4px 4px 0 0;min-height:1px}
+.ecol em{position:absolute;bottom:-18px;font-style:normal;font-size:.62rem;color:var(--muted)}
+.ecol .eval{font-size:.58rem;color:var(--muted);white-space:nowrap;margin-bottom:2px;writing-mode:vertical-rl;transform:rotate(180deg)}
+.echart+*{margin-top:22px}
+.egrid{gap:14px}
+.egrid h3,.panel>h3{margin:0 0 8px}
+.erow{display:grid;grid-template-columns:minmax(0,1.3fr) 1fr auto;gap:10px;align-items:center;font-size:.86rem;padding:4px 0}
+.ebar{height:8px;background:var(--bg);border-radius:4px;overflow:hidden}
+.ebar i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.erow b{font-variant-numeric:tabular-nums}
+.etreat td,.etreat th{padding:7px 8px}
+.etreat tfoot th{border-top:2px solid var(--line);font-size:.95rem;color:var(--ink);font-weight:700}
+.etreat .ebar{display:inline-block;width:70%;vertical-align:middle}
+/* old patient from paper */
+.paperstart{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border:1px dashed var(--accent);border-radius:12px;background:var(--accent-soft)}
+.paperguide{border:1.5px solid var(--accent);background:var(--accent-soft);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.pgsteps{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px}
+.pgstep{display:flex;gap:8px;align-items:flex-start;text-align:left;border:1.5px solid var(--line);background:var(--paper);border-radius:10px;padding:6px 8px;font-size:.8rem;color:var(--ink)}
+.pgstep em{font-style:normal;flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--bg);font-weight:700;font-size:.75rem}
+.pgstep.ok em{background:var(--ok);color:#fff}
+.pgstep.on{border-color:var(--accent)}
+.pgstep span{display:flex;flex-direction:column;gap:1px;min-width:0}
+.pgstep small{color:var(--muted);font-size:.7rem;line-height:1.25}
+.done .pr small{display:inline-block;width:100%;text-decoration:none}
+.hist td:first-child{white-space:nowrap}
+/* owner tools */
+.ownerlink{text-align:center;margin:10px 0 0;opacity:.6}
+.ownerlink .linkbtn{font-size:.78rem}
+.ownercard{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.ownercard.danger{border-color:var(--alert)}
+.ownerbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 12px;border-radius:12px;background:#b45309;color:#fff;font-size:.85rem}
+.ownerbar .btn{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.5);color:#fff}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div class="toast" id="toast" hidden></div>
-<script src="local-db.js"></script>
+<script>window.__OWNER_TEST=(function(){try{return sessionStorage.getItem('ownerTest')==='1'}catch(e){return false}})();</script>
+<script>if(window.__OWNER_TEST)document.write('<script src="local-db.js"><\/script>');else document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"><\/script><script src="config.js"><\/script>');</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="app.js"></script>
-<script>if('serviceWorker' in navigator&&location.protocol==='https:'||location.hostname==='localhost'){navigator.serviceWorker&&navigator.serviceWorker.register('sw.js').catch(()=>{})}</script>
 </body>
 </html>
