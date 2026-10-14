@@ -7,7 +7,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
-const APP_VERSION='14 Oct 2026 · salary payment method & receipt';
+const APP_VERSION='14 Oct 2026 · paid & due, dentist pay slips';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -444,7 +444,7 @@ function buildRecord(p,date){
   const open=p.plan.filter(i=>i.status!=='completed');
   if(showBal()){const b=billOf(p);sec('Payment summary');
     const ln=(k,v,bold)=>{ensure(6);doc.setFont('helvetica',bold?'bold':'normal');doc.setTextColor(...INK);doc.text(k,M,y);doc.text(v,M+70,y,{align:'right'});y+=5.4};
-    ln('Treatment done',money(b.charges));if(b.disc)ln('Discount','- '+money(b.disc));ln('Paid',money(b.paid));ln(b.balance<0?'Advance (credit)':'Remaining balance',money(Math.abs(b.balance)),true);doc.setFont('helvetica','normal');y+=1}
+    ln('Total treatment',money(b.total));if(b.plannedTotal)ln('  of which done so far',money(b.charges));if(b.disc)ln('Discount','- '+money(b.disc));ln('Paid',money(b.paid));ln(b.due<0?'Advance (credit)':'Due',money(Math.abs(b.due)),true);doc.setFont('helvetica','normal');y+=1}
   sec('Treatment still planned');
   if(open.length)open.sort((a,b)=>a.phase-b.phase).forEach(i=>para('Phase '+i.phase+'   '+(i.tooth?i.tooth+'  ':'')+i.proc+(i.surf?' ('+i.surf+')':'')+'   '+money(i.fee)));
   else para('Treatment plan complete.');
@@ -607,8 +607,8 @@ function importPanel(){
 
 /* ---------- payments, discounts, invoice and receipt ---------- */
 let payList=[],payLoading=false;
-const showBal=()=>lsGet('printBal')!=='off';
-const balToggle=()=>`<label class="row small" style="gap:8px"><input type="checkbox" id="print-bal" ${showBal()?'checked':''} style="width:20px;height:20px"> Show amount paid and remaining balance on printouts</label>`;
+const showBal=()=>true;
+const balToggle=()=>'';
 const PAY_METHODS=['Cash','Card','Bank transfer','JazzCash / Easypaisa','Panel / company','Sehat Card','Cheque','Other'];
 const refLabel=m=>m==='Panel / company'?'Panel company name':m==='Card'?'Card last 4 digits or slip no.':m==='Bank transfer'||m==='JazzCash / Easypaisa'?'Transaction ID':m==='Cheque'?'Cheque number':m==='Sehat Card'?'Sehat Card / claim number':'Reference (optional)';
 async function loadPayments(pid){const {data,error}=await sb.from('payments').select('*').eq('patient_id',pid).order('paid_on');if(error)throw error;payList=(data||[]).sort((a,b)=>(a.paid_on+a.created_at).localeCompare(b.paid_on+b.created_at))}
@@ -617,7 +617,8 @@ function billOf(p){
   const done=p.plan.filter(i=>i.status==='completed'),planned=p.plan.filter(i=>i.status!=='completed');
   const charges=done.reduce((a,i)=>a+(+i.fee||0),0),plannedTotal=planned.reduce((a,i)=>a+(+i.fee||0),0);
   const disc=payList.reduce((a,x)=>a+(+x.discount||0),0),paid=payList.reduce((a,x)=>a+(+x.amount||0),0);
-  return {done,planned,charges,plannedTotal,disc,paid,balance:charges-disc-paid};
+  const total=charges+plannedTotal;
+  return {done,planned,charges,plannedTotal,disc,paid,balance:charges-disc-paid,total,due:total-disc-paid};
 }
 function numWords(n){
   n=Math.round(Math.abs(+n||0));if(!n)return 'Zero';
@@ -633,14 +634,14 @@ function payTab(p){
   const b=billOf(p),f=view.payForm||{};const method=f.method||'Cash',dtype=f.dtype||'none';
   const canPay=!readOnly();
   return `<section class="panel">
-    <div class="row"><h2>Payments</h2><span class="spacer"></span>${b.balance<0?'<span class="pill ok">Advance / credit</span>':b.balance===0&&b.charges?'<span class="pill ok">Fully paid</span>':''}</div>
+    <div class="row"><h2>Payments</h2><span class="spacer"></span>${b.due<0?'<span class="pill ok">Advance / credit</span>':b.due===0&&b.total?'<span class="pill ok">Fully paid</span>':''}</div>
     <div class="paysum">
-      <div><span>Treatment done</span><b>${money(b.charges)}</b></div>
+      <div><span>Total treatment</span><b>${money(b.total)}</b></div>
       <div><span>Discount</span><b>${b.disc?'− '+money(b.disc):money(0)}</b></div>
       <div><span>Paid</span><b>${money(b.paid)}</b></div>
-      <div class="${b.balance>0?'due':''}"><span>${b.balance<0?'Advance':'Balance due'}</span><b>${money(Math.abs(b.balance))}</b></div>
+      <div class="${b.due>0?'due':''}"><span>${b.due<0?'Advance':'Due'}</span><b>${money(Math.abs(b.due))}</b></div>
     </div>
-    <p class="small muted" style="margin:0">Charges count treatment marked completed in the Treatment plan. Still planned: ${money(b.plannedTotal)}${b.planned.length?' ('+b.planned.length+' item'+(b.planned.length>1?'s':'')+')':''}.</p>
+    <p class="small muted" style="margin:0">Total treatment = everything in the treatment plan: done so far ${money(b.charges)}${b.plannedTotal?' + still to do '+money(b.plannedTotal):''}. Every payment counts, even before the treatment is marked completed.</p>
     <div class="row"><button class="btn primary" data-act="printInvoice">${icon('doc')} Invoice with treatment</button><button class="btn" data-act="printReceipt" ${payList.length?'':'disabled'}>${icon('doc')} Payment receipt only</button></div>
     ${balToggle()}
     <p class="small muted" style="margin:0">The invoice lists the treatment, fees, discount and payments. The receipt shows only the money received, without any treatment.</p>
@@ -649,7 +650,7 @@ function payTab(p){
     <h2>Record a payment</h2>
     <div class="grid2">
       <label class="f"><span>Date</span><input type="date" id="pay-date" value="${f.date||today()}"></label>
-      <label class="f"><span>Amount received (Rs)</span><input type="number" inputmode="numeric" id="pay-amt" min="0" step="1" value="${esc(f.amount??(b.balance>0?b.balance:''))}" placeholder="0"></label>
+      <label class="f"><span>Amount received (Rs)</span><input type="number" inputmode="numeric" id="pay-amt" min="0" step="1" value="${esc(f.amount??(b.due>0?b.due:''))}" placeholder="0"></label>
     </div>
     <div class="f"><span class="small muted" style="font-weight:500">Payment method</span>
       <div class="chips" role="radiogroup">${PAY_METHODS.map(m=>`<button type="button" class="chip ${m===method?'on':''}" data-paymethod="${m}" role="radio" aria-checked="${m===method}">${m}</button>`).join('')}</div></div>
@@ -680,14 +681,14 @@ function readPayForm(p){
   const g=id=>{const el=$('#'+id);return el?el.value:undefined};
   ['date','amount','reference','dval','dreason','note'].forEach((k,i)=>{const v=g(['pay-date','pay-amt','pay-ref','pay-disc','pay-dreason','pay-note'][i]);if(v!==undefined)f[k]=v});
   f.method=f.method||'Cash';f.dtype=f.dtype||'none';
-  const dueBefore=Math.max(0,b.balance);const dv=Math.max(0,parseFloat(f.dval)||0);
+  const dueBefore=Math.max(0,b.due);const dv=Math.max(0,parseFloat(f.dval)||0);
   const discount=f.dtype==='rs'?Math.round(dv):f.dtype==='pct'?Math.round(dueBefore*Math.min(dv,100)/100):0;
   const amount=Math.max(0,Math.round(parseFloat(f.amount)||0));
-  return {f,dueBefore,discount,amount,after:b.balance-discount-amount};
+  return {f,dueBefore,discount,amount,after:b.due-discount-amount};
 }
 function payPreview(p){
   const r=readPayForm(p);
-  return `<span>Due now <b>${money(r.dueBefore)}</b></span>${r.discount?`<span>− Discount <b>${money(r.discount)}</b></span>`:''}<span>− Paying <b>${money(r.amount)}</b></span><span class="${r.after>0?'due':'ok'}">${r.after<0?'Advance':'Balance after'} <b>${money(Math.abs(r.after))}</b></span>`;
+  return `<span>Due now <b>${money(r.dueBefore)}</b></span>${r.discount?`<span>− Discount <b>${money(r.discount)}</b></span>`:''}<span>− Paying <b>${money(r.amount)}</b></span><span class="${r.after>0?'due':'ok'}">${r.after<0?'Advance':'Due after this'} <b>${money(Math.abs(r.after))}</b></span>`;
 }
 function pdfBase(title){
   const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'mm',format:'a4'});
@@ -721,7 +722,7 @@ function buildInvoice(p){
   if(b.done.length){P.row(['Date',isAes(p)?'Area':'Tooth','Treatment','Fee'],xs,{bold:true,size:8.5,color:C.MUT,right:[3],w:[22,14,110,40]});doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);
     b.done.forEach(i=>P.row([i.doneDate?fmtDate(i.doneDate):'',i.tooth||'–',i.proc+(i.surf?' ('+i.surf+')':''),money(i.fee)],xs,{right:[3],w:[22,14,110,40]}));}
   else P.row(['No treatment completed yet.'],[M],{color:C.MUT});
-  if(b.planned.length){P.sec('Treatment still planned (not charged yet)');
+  if(b.planned.length){P.sec('Treatment planned (not done yet)');
     b.planned.forEach(i=>P.row(['','',(i.tooth?i.tooth+'  ':'')+i.proc+(i.surf?' ('+i.surf+')':''),money(i.fee)],xs,{right:[3],w:[22,14,110,40],color:C.MUT}));
     P.row(['','','Planned total',money(b.plannedTotal)],xs,{right:[3],w:[22,14,110,40],color:C.MUT,bold:true});}
   if(showBal()&&payList.length){P.sec('Payments received');
@@ -729,8 +730,8 @@ function buildInvoice(p){
   P.ensure(40);st.y+=4;const sx=W-M-80;
   const tot=(l,v,bold)=>{doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(bold?11:9.5);doc.setTextColor(...C.INK);doc.text(l,sx,st.y);doc.text(v,W-M,st.y,{align:'right'});st.y+=bold?7:5.6};
   doc.setDrawColor(...C.LINE);doc.line(sx,st.y-4,W-M,st.y-4);
-  tot('Treatment done',money(b.charges));if(b.disc)tot('Discount','- '+money(b.disc));
-  if(showBal()){tot('Paid',money(b.paid));doc.setDrawColor(...C.INK);doc.line(sx,st.y-3.5,W-M,st.y-3.5);st.y+=1.5;tot(b.balance<0?'Advance (credit)':'Remaining balance',money(Math.abs(b.balance)),true);}
+  tot('Treatment done',money(b.charges));if(b.plannedTotal)tot('Treatment still planned',money(b.plannedTotal));if(b.plannedTotal)tot('Total treatment',money(b.total),false);if(b.disc)tot('Discount','- '+money(b.disc));
+  if(showBal()){tot('Paid',money(b.paid));doc.setDrawColor(...C.INK);doc.line(sx,st.y-3.5,W-M,st.y-3.5);st.y+=1.5;tot(b.due<0?'Advance (credit)':'Due',money(Math.abs(b.due)),true);}
   else{doc.setDrawColor(...C.INK);doc.line(sx,st.y-3.5,W-M,st.y-3.5);st.y+=1.5;tot('Total after discount',money(b.charges-b.disc),true);}
   P.foot(p);return doc.output('blob');
 }
@@ -748,7 +749,8 @@ function buildReceipt(p,x){
   if(+x.discount)line('Discount given',money(x.discount)+(x.disc_pct?' ('+x.disc_pct+'%)':'')+(x.disc_reason?' – '+x.disc_reason:''));
   if(x.note)line('Note',x.note);
   st.y+=3;doc.setDrawColor(...C.LINE);doc.line(M,st.y-4,W-M,st.y-4);
-  if(showBal()){line('Total paid to date',money(b.paid));line(b.balance<0?'Advance (credit)':'Remaining balance',money(Math.abs(b.balance)));}
+  line('Total treatment',money(b.total));if(b.disc)line('Total discount','- '+money(b.disc));line('Total paid to date',money(b.paid));
+  doc.setFont('helvetica','bold');line(b.due<0?'Advance (credit)':'Due',money(Math.abs(b.due)));doc.setFont('helvetica','normal');
   P.foot(p);return doc.output('blob');
 }
 function printBill(kind,payId){
@@ -1266,7 +1268,8 @@ function earnDentists(D){
     return `<tr class="${sel===n?'selrow':''}"><td><button class="linkbtn" data-earndent="${esc(n)}">${esc(n)}</button></td><td style="text-align:right">${o.n}</td><td style="text-align:right"><b>${money(o.v)}</b></td><td>${pay}</td><td style="text-align:right">${share}</td></tr>`}).join('');
   let detail='';
   if(sel){const mine=D.done.filter(x=>x.i.doneBy===sel);const bp={};mine.forEach(({i})=>{const k=procGroup(i.proc);const o=bp[k]||(bp[k]={n:0,v:0});o.n++;o.v+=+i.fee||0});const tv=mine.reduce((a,x)=>a+(+x.i.fee||0),0);const st=staffFor(sel);
-    detail=`<section class="subpanel"><div class="row"><h3 style="margin:0">${esc(sel)} – ${esc(earnTitle(D.f,D.t))}</h3><span class="spacer"></span><button class="btn small" data-act="printDentist">${icon('doc')} Print PDF</button></div>
+    const curM=(earn.anchor||today()).slice(0,7);const slip=st?finOf('salary').find(r=>r.data.staff_id===st.id&&r.data.month===curM&&r.data.status==='paid'):null;
+    detail=`<section class="subpanel"><div class="row"><h3 style="margin:0">${esc(sel)} – ${esc(earnTitle(D.f,D.t))}</h3><span class="spacer"></span>${slip?`<button class="btn small primary" data-salslip="${slip.id}">${icon('doc')} Pay slip ${esc(MONTHS[+curM.slice(5,7)-1])}</button>`:st?`<button class="btn small" data-paydent="${st.id}">Pay ${esc(MONTHS[+curM.slice(5,7)-1])} salary</button>`:''}<button class="btn small" data-act="printDentist">${icon('doc')} Dentist report PDF</button></div>
       ${treatTable(bp,tv,mine.length)}
       ${mine.length?`<details style="margin-top:8px"><summary class="small">Show every treatment (${mine.length})</summary><div class="tablewrap"><table class="att"><thead><tr><th>Date</th><th>Patient</th><th>Tooth</th><th>Treatment</th><th style="text-align:right">Fee</th></tr></thead><tbody>${mine.sort((a,b)=>String(b.i.doneDate).localeCompare(String(a.i.doneDate))).map(({p,i})=>`<tr><td>${fmtDate(i.doneDate)}</td><td>${esc((p.first+' '+p.last).trim())}</td><td>${esc(i.tooth||'–')}</td><td>${esc(i.proc)}</td><td style="text-align:right">${money(i.fee)}</td></tr>`).join('')}</tbody></table></div></details>`:''}
       <form id="dentPayForm" class="payset"><b>Pay for ${esc(sel)}</b>
@@ -1358,6 +1361,7 @@ async function salarySlip(salId){
   P.kv('Salary for',mLabel,M,95);P.kv('Payment method',(d.method||'–')+(d.ref?' – '+d.ref:''),M+100,80);y.y+=13;
   P.sec('Pay');
   const two=(l,v,b)=>P.row([l,v],[M,W-M],{right:[1],bold:b,w:[140,50]});
+  two('Pay type',sd.pay==='percent'?'Percentage of own treatment':'Fixed monthly salary');two('Paid by',(d.method||'–')+(d.ref?' – '+d.ref:''));
   if(sd.pay==='percent'){const f=d.month+'-01',t=isoD(new Date(+d.month.slice(0,4),+d.month.slice(5,7),0));const v=doneIn(f,t,sd.name).reduce((a,x)=>a+(+x.i.fee||0),0);
     two('Treatment done in '+mLabel,money(v));two('Share',(+sd.percent||0)+'%');}
   else two('Monthly salary',money(sd.salary));
@@ -1417,7 +1421,17 @@ async function earnPdf(what,dentist){
     doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);P.row(['Total – all treatments',String(count),money(total)],xs,{right:[1,2],bold:true,w:[120,25,40]})};
   if(dentist){const mine=D.done.filter(x=>x.i.doneBy===dentist);const bp={};mine.forEach(({i})=>{const k=procGroup(i.proc);const o=bp[k]||(bp[k]={n:0,v:0});o.n++;o.v+=+i.fee||0});const tv=mine.reduce((a,x)=>a+(+x.i.fee||0),0);
     P.kv('Dentist',dentist,M,120);st.y+=13;P.sec('Treatments done');if(mine.length)tTable(bp,tv,mine.length);else P.row(['No treatment in this period.'],[M],{color:C.MUT});
-    const stf=staffFor(dentist);if(stf){P.sec('Pay');two('Pay type',stf.data.pay==='percent'?(+stf.data.percent||0)+'% of treatment':money(stf.data.salary)+' per month');if(stf.data.pay==='percent')two('Share for this period',money(Math.round(tv*(+stf.data.percent||0)/100)),true)}
+    const stf=staffFor(dentist);P.sec('Salary / pay');
+    if(stf){if(stf.data.pay==='percent')two('Pay type: percentage',(+stf.data.percent||0)+'% of own treatment');else two('Pay type: fixed monthly salary',money(stf.data.salary)+' / month');
+      if(stf.data.pay==='percent')two('Share earned in this period ('+(+stf.data.percent||0)+'% of '+money(tv)+')',money(Math.round(tv*(+stf.data.percent||0)/100)),true);
+      const months=[];if(earn.period!=='all'){let d=parseD(D.f.slice(0,7)+'-01');const end=parseD(D.t);while(d<=end&&months.length<24){months.push(isoD(d).slice(0,7));d=new Date(d.getFullYear(),d.getMonth()+1,1)}}
+      const sals=finOf('salary').filter(r=>r.data.staff_id===stf.id&&(earn.period==='all'||months.includes(r.data.month))).sort((a,b)=>String(a.data.month).localeCompare(String(b.data.month)));
+      const mlab=m=>parseD(m+'-01').toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+      P.row(['Month','Status','Paid by','Amount'],[M,M+50,M+90,W-M],{bold:true,size:8.5,color:C.MUT,right:[3],w:[48,38,70,40]});
+      const shown=new Set();sals.forEach(r=>{shown.add(r.data.month);const pd=r.data.status==='paid';P.row([mlab(r.data.month),pd?'Paid'+(r.data.paid_on?' '+fmtDate(r.data.paid_on):''):'Unpaid',pd?(r.data.method||'–')+(r.data.ref?' – '+r.data.ref:''):'–',money(pd?r.data.amount:payDue(stf,r.data.month))],[M,M+50,M+90,W-M],{right:[3],w:[48,38,70,40]})});
+      months.filter(m=>!shown.has(m)&&m<=today().slice(0,7)).forEach(m=>P.row([mlab(m),'Unpaid','–',money(payDue(stf,m))],[M,M+50,M+90,W-M],{right:[3],w:[48,38,70,40]}));
+      const paidT=sals.filter(r=>r.data.status==='paid').reduce((a,r)=>a+(+r.data.amount||0),0);doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);two('Total salary paid',money(paidT),true)}
+    else P.row(['Pay not set yet – set it in Earnings → Dentists.'],[M],{color:C.MUT})
     if(mine.length){P.sec('Every treatment');const xs=[M,M+24,M+80,M+96,W-M];mine.sort((a,b)=>String(a.i.doneDate).localeCompare(String(b.i.doneDate))).forEach(({p,i})=>P.row([fmtDate(i.doneDate),(p.first+' '+p.last).trim(),i.tooth||'–',i.proc,money(i.fee)],xs,{right:[4],w:[22,54,14,70,30],size:8.5}))}
   }else{
     if(what==='all'){P.sec('Summary');two('Money received',money(D.received));two('Expenses',money(D.expTotal));two('Salaries paid',money(D.salPaid));two('Profit',(D.profit<0?'- ':'')+money(Math.abs(D.profit)),true);two('Treatment done (value)',money(D.treatVal));two('Discounts given',money(D.disc));two('Still owed by patients (up to now)',money(D.owed))}
@@ -2548,6 +2562,7 @@ document.addEventListener('click',async e=>{
     try{await finSave('staff',Object.assign({},r.data,{active:false}),r.id);earn.staffEdit=null;render();toast('Removed from staff')}catch(err){toast(friendly(err))}return}
   if(d.salpaid){earn.salForm={staff_id:d.salpaid,amount:d.amt||''};render();const i=$('#sl-amt');if(i)i.focus();return}
   if(d.act==='salCancel'){earn.salForm=null;render();return}
+  if(d.paydent){const st=finOf('staff').find(x=>x.id===d.paydent);if(!st)return;earn.tab='staff';earn.salForm={staff_id:st.id,amount:payDue(st,(earn.anchor||today()).slice(0,7))};render();const i=$('#sl-amt');if(i)i.focus();return}
   if(d.salslip){try{await salarySlip(d.salslip)}catch(err){toast(friendly(err))}return}
   if(d.salunpaid){const month=(earn.anchor||today()).slice(0,7);const ex=finOf('salary').find(x=>x.data.staff_id===d.salunpaid&&x.data.month===month);
     if(ex){try{await finSave('salary',Object.assign({},ex.data,{status:'unpaid',paid_on:'',method:'',ref:''}),ex.id);render();toast('Marked as unpaid')}catch(err){toast(friendly(err))}}return}
