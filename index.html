@@ -498,8 +498,9 @@ table.att td.num{font-variant-numeric:tabular-nums}
 <div id="app"></div>
 <div class="toast" id="toast" hidden></div>
 <script>window.__OWNER_TEST=(function(){try{return sessionStorage.getItem('ownerTest')==='1'}catch(e){return false}})();</script>
-<script>if(window.__OWNER_TEST)document.write('<script src="local-db.js"><\/script>');else document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"><\/script><script src="config.js"><\/script>');</script>
+<script src="local-db.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="app.js"></script>
+<script>if('serviceWorker' in navigator&&location.protocol==='https:'||location.hostname==='localhost'){navigator.serviceWorker&&navigator.serviceWorker.register('sw.js').catch(()=>{})}</script>
 </body>
 </html>
