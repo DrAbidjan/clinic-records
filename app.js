@@ -7,7 +7,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
-const APP_VERSION='14 Oct 2026 · paid & due, dentist pay slips';
+const APP_VERSION='14 Oct 2026 · separate prints, expense vouchers';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -1295,11 +1295,12 @@ function earnExpenses(D){
         <label class="f"><span>Amount (Rs)</span><input type="number" id="ex-amt" min="0" step="1" inputmode="numeric" value="${esc(f.amount||'')}" required></label>
       </div>
       <label class="f"><span>Note (optional)</span><input type="text" id="ex-note" value="${esc(f.note||'')}"></label>
+      <div class="chips salmeth"><span class="small muted" style="align-self:center">Paid by:</span>${SAL_METHODS.map((m,i)=>`<label class="chip"><input type="radio" name="ex-method" value="${m}" ${(f.method||'Cash')===m?'checked':''}> ${m}</label>`).join('')}</div>
       <div class="row"><button class="btn primary" type="submit">Save expense</button></div>
     </form>
     <section class="subpanel"><div class="row"><h3 style="margin:0">Expenses – ${esc(earnTitle(D.f,D.t))}</h3><span class="spacer"></span><b>${money(D.expTotal)}</b></div>
       ${D.exps.length?`<div class="tablewrap"><table class="att"><thead><tr><th>Date</th><th>Type</th><th>Item</th><th style="text-align:right">Amount</th><th></th></tr></thead><tbody>
-      ${D.exps.map(r=>{const d=r.data;return `<tr><td>${fmtDate(d.date)}</td><td>${esc(d.cat||'')}${d.lab?`<br><small class="muted">${esc(d.lab)}</small>`:''}</td><td>${esc(d.item||'')}${d.pat?` <small class="muted">· ${esc(d.pat)}</small>`:''}${d.note?`<br><small class="muted">${esc(d.note)}</small>`:''}</td><td style="text-align:right">${money(d.amount)}</td><td>${view.confirm==='expdel:'+r.id?`<button class="btn small danger" data-expdel="${r.id}">Delete</button>`:`<button class="btn small" data-askexpdel="${r.id}" aria-label="Delete expense">✕</button>`}</td></tr>`}).join('')}
+      ${D.exps.map(r=>{const d=r.data;return `<tr><td>${fmtDate(d.date)}</td><td>${esc(d.cat||'')}${d.lab?`<br><small class="muted">${esc(d.lab)}</small>`:''}</td><td>${esc(d.item||'')}${d.pat?` <small class="muted">· ${esc(d.pat)}</small>`:''}${d.note?`<br><small class="muted">${esc(d.note)}</small>`:''}</td><td style="text-align:right">${money(d.amount)}${d.method?`<br><small class="muted">${esc(d.method)}</small>`:''}</td><td><div class="row" style="flex-wrap:nowrap;gap:4px"><button class="btn small" data-expslip="${r.id}">${icon('doc')} Voucher</button>${view.confirm==='expdel:'+r.id?`<button class="btn small danger" data-expdel="${r.id}">Delete</button>`:`<button class="btn small" data-askexpdel="${r.id}" aria-label="Delete expense">✕</button>`}</div></td></tr>`}).join('')}
       </tbody></table></div><h3 style="margin:12px 0 6px">By type</h3>${listBars(D.byCat,D.expTotal)}`:'<p class="muted" style="margin:0">No expenses in this period.</p>'}
     </section>`;
 }
@@ -1351,6 +1352,20 @@ function salFormHtml(r,month){const f=earn.salForm;
     <div class="chips">${SAL_METHODS.map((m,i)=>`<label class="chip"><input type="radio" name="sl-method" value="${m}" ${i===0?'checked':''}> ${m}</label>`).join('')}</div>
     <div class="row"><button class="btn primary" type="submit">Save as paid</button><button class="btn" type="button" data-act="salCancel">Cancel</button></div>
   </form>`}
+async function expenseVoucher(id){
+  if(!window.jspdf){toast('The PDF tool did not load. Check your internet and reload the page.');return}
+  const r=finOf('expense').find(x=>x.id===id);if(!r)return;const d=r.data;const P=pdfBase('Expense voucher');const {doc,W,M,st:y,C}=P;
+  const no='EXP-'+String(d.date||'').replace(/-/g,'').slice(2)+'-'+String(id).replace(/-/g,'').slice(0,4).toUpperCase();
+  P.kv('Voucher no.',no,M,60);P.kv('Date',d.date?fmtDate(d.date):'–',M+70,40);P.kv('Paid by',(d.method||'Cash'),W-M-56,56);y.y+=14;
+  P.sec('Expense');const two=(l,v,b)=>P.row([l,v],[M,W-M],{right:[1],bold:b,w:[120,70]});
+  two('Type',d.cat+(d.lab?' – '+d.lab:''));if(d.item)two(d.cat==='Materials'?'Material':d.cat==='Lab charges'?'Lab':'For',d.item);if(d.pat)two('Patient',d.pat);if(d.note)two('Note',d.note);
+  doc.setDrawColor(...C.LINE);doc.line(M,y.y-3.6,W-M,y.y-3.6);two('Amount',money(d.amount),true);
+  P.row(['In words: Rupees '+numWords(d.amount)+' only'],[M],{color:C.MUT,size:9,w:[170]});
+  y.y+=34;doc.setDrawColor(...C.INK);doc.line(M,y.y,M+70,y.y);doc.line(W-M-70,y.y,W-M,y.y);
+  doc.setFontSize(8);doc.setTextColor(...C.MUT);doc.text('Approved by',M,y.y+4);doc.text(P.clean(me.name),M,y.y+8);doc.text('Received by (supplier / lab)',W-M-70,y.y+4);
+  doc.setFontSize(7.5);doc.text(P.clean(clinic.name)+' – expense voucher '+no,M,290);
+  await deliverFile(doc.output('blob'),('Expense_voucher_'+(d.item||d.cat)+'_'+(d.date||'')+'.pdf').replace(/[^\w.\-]+/g,'_'),'save');
+}
 async function salarySlip(salId){
   if(!window.jspdf){toast('The PDF tool did not load. Check your internet and reload the page.');return}
   const s=finOf('salary').find(x=>x.id===salId);if(!s)return;const st=finOf('staff').find(x=>x.id===s.data.staff_id)||{data:{name:'Staff',role:''}};
@@ -1372,7 +1387,7 @@ async function salarySlip(salId){
   doc.setFontSize(7.5);doc.text(P.clean(clinic.name)+' – salary receipt '+no,M,290);
   await deliverFile(doc.output('blob'),('Salary_receipt_'+sd.name+'_'+d.month+'.pdf').replace(/[^\w.\-]+/g,'_'),'save');
 }
-const readExpForm=()=>{const g=id=>{const x=$('#'+id);return x?x.value:''};return {date:g('ex-date'),cat:g('ex-cat'),lab:g('ex-lab'),item:g('ex-item').trim(),pat:g('ex-pat').trim(),amount:g('ex-amt'),note:g('ex-note').trim()}};
+const readExpForm=()=>{const g=id=>{const x=$('#'+id);return x?x.value:''};return {date:g('ex-date'),cat:g('ex-cat'),lab:g('ex-lab'),item:g('ex-item').trim(),pat:g('ex-pat').trim(),amount:g('ex-amt'),note:g('ex-note').trim(),method:(document.querySelector('input[name=ex-method]:checked')||{}).value||'Cash'}};
 function earningsView(){
   if(!isAdmin())return `${homeNav('earn')}<section class="panel"><h2>Clinic earnings</h2><p class="muted">Only the clinic admin can see earnings.</p></section>`;
   if(!earnOpen())return `${homeNav('earn')}<h1>Earnings</h1>${earnLockView()}`;
@@ -1383,7 +1398,7 @@ function earningsView(){
   const body={overview:earnOverview,treat:D=>treatTable(D.byProc,D.treatVal,D.done.length),dentists:earnDentists,expenses:earnExpenses,staff:earnStaff,payments:earnPayments}[earn.tab]||earnOverview;
   return `${homeNav('earn')}
   <div class="row" style="gap:10px;flex-wrap:wrap"><h1 style="margin:0">Earnings</h1><span class="spacer"></span>
-    <label class="row small" style="gap:6px">Print <select id="earn-print" style="width:auto">${[['all','Whole report'],['treat','Treatments only'],['dentists','Dentists only'],['expenses','Expenses & salaries'],['payments','Payments list']].map(([k,l])=>`<option value="${k}" ${earn.printWhat===k?'selected':''}>${l}</option>`).join('')}</select></label>
+    <label class="row small" style="gap:6px">Print <select id="earn-print" style="width:auto">${[['all','Whole report'],['summary','Summary only'],['treat','Treatments only'],['dentists','Dentists only'],['expenses','Expenses only'],['salaries','Salaries only'],['payments','Payments received only']].map(([k,l])=>`<option value="${k}" ${earn.printWhat===k?'selected':''}>${l}</option>`).join('')}</select></label>
     <button class="btn small primary" data-act="earnPdf">${icon('doc')} PDF</button>
     <button class="btn small" data-act="earnCsv">Excel/CSV</button><button class="btn small" data-act="earnLock">${icon('lock')} Lock</button></div>
   ${needSqlNote()}
@@ -1413,7 +1428,7 @@ function earnCsv(){
 /* PDF report: whole, treatments, dentists, expenses & salaries, payments – or one dentist */
 async function earnPdf(what,dentist){
   if(!window.jspdf){toast('The PDF tool did not load. Check your internet and reload the page.');return}
-  const D=earnData();const P=pdfBase(dentist?'Dentist report':'Clinic report');const {doc,W,M,st,C}=P;
+  const D=earnData();const TT={all:'Clinic report',summary:'Clinic summary',treat:'Treatment earnings',dentists:'Dentist earnings',expenses:'Expenses report',salaries:'Salaries report',payments:'Payments received'};const P=pdfBase(dentist?'Dentist report':(TT[what]||'Clinic report'));const {doc,W,M,st,C}=P;
   P.kv('Period',earnTitle(D.f,D.t)+(earn.sec==='all'?'':' · '+(earn.sec==='aes'?'Aesthetics':'Dental')),M,90);P.kv('Printed',fmtDate(today())+' by '+me.name,M+95,80);st.y+=13;
   const R=[W-M];const two=(l,v,b)=>P.row([l,v],[M,W-M],{right:[1],bold:b,w:[140,50]});
   const tTable=(bp,total,count)=>{const xs=[M,W-M-45,W-M];P.row(['Treatment','How many','Earned'],xs,{bold:true,size:8.5,color:C.MUT,right:[1,2],w:[120,25,40]});
@@ -1434,13 +1449,26 @@ async function earnPdf(what,dentist){
     else P.row(['Pay not set yet – set it in Earnings → Dentists.'],[M],{color:C.MUT})
     if(mine.length){P.sec('Every treatment');const xs=[M,M+24,M+80,M+96,W-M];mine.sort((a,b)=>String(a.i.doneDate).localeCompare(String(b.i.doneDate))).forEach(({p,i})=>P.row([fmtDate(i.doneDate),(p.first+' '+p.last).trim(),i.tooth||'–',i.proc,money(i.fee)],xs,{right:[4],w:[22,54,14,70,30],size:8.5}))}
   }else{
-    if(what==='all'){P.sec('Summary');two('Money received',money(D.received));two('Expenses',money(D.expTotal));two('Salaries paid',money(D.salPaid));two('Profit',(D.profit<0?'- ':'')+money(Math.abs(D.profit)),true);two('Treatment done (value)',money(D.treatVal));two('Discounts given',money(D.disc));two('Still owed by patients (up to now)',money(D.owed))}
+    if(what==='all'||what==='summary'){P.sec('Summary');two('Money received',money(D.received));two('Expenses',money(D.expTotal));two('Salaries paid',money(D.salPaid));two('Profit',(D.profit<0?'- ':'')+money(Math.abs(D.profit)),true);two('Treatment done (value)',money(D.treatVal));two('Discounts given',money(D.disc));two('Still owed by patients (up to now)',money(D.owed))}
     if(what==='all'||what==='treat'){P.sec('Earnings by treatment');if(D.done.length)tTable(D.byProc,D.treatVal,D.done.length);else P.row(['No treatment in this period.'],[M],{color:C.MUT})}
     if(what==='all'||what==='dentists'){P.sec('Treatment value by dentist');const xs=[M,W-M-45,W-M];P.row(['Dentist','Treatments','Value'],xs,{bold:true,size:8.5,color:C.MUT,right:[1,2],w:[120,25,40]});
       Object.entries(D.byDent).sort((a,b)=>b[1].v-a[1].v).forEach(([k,o])=>{const s=staffFor(k);P.row([k+(s&&s.data.pay==='percent'?'  ('+(+s.data.percent||0)+'% = '+money(Math.round(o.v*(+s.data.percent||0)/100))+')':''),String(o.n),money(o.v)],xs,{right:[1,2],w:[120,25,40]})})}
-    if(what==='all'||what==='expenses'){P.sec('Expenses');if(D.exps.length){const xs=[M,M+24,M+70,W-M];D.exps.slice().reverse().forEach(r=>{const d=r.data;P.row([fmtDate(d.date),d.cat+(d.lab?' – '+d.lab:''),(d.item||'')+(d.pat?' · '+d.pat:''),money(d.amount)],xs,{right:[3],w:[22,46,90,30],size:8.5})});
+    if(what==='all'||what==='expenses'){P.sec('Expenses');if(D.exps.length){const xs=[M,M+24,M+70,W-M];D.exps.slice().reverse().forEach(r=>{const d=r.data;P.row([fmtDate(d.date),d.cat+(d.lab?' – '+d.lab:''),(d.item||'')+(d.pat?' · '+d.pat:'')+(d.method?' ('+d.method+')':''),money(d.amount)],xs,{right:[3],w:[22,46,90,30],size:8.5})});
         doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);two('Total expenses',money(D.expTotal),true);Object.entries(D.byCat).forEach(([k,v])=>two('   '+k,money(v)))}else P.row(['No expenses in this period.'],[M],{color:C.MUT});
-      P.sec('Salaries paid');if(D.sals.length){D.sals.forEach(r=>{const s=finOf('staff').find(x=>x.id===r.data.staff_id);two((s?s.data.name+' ('+s.data.role+')':'Staff')+' – '+r.data.month+(r.data.paid_on?', paid '+fmtDate(r.data.paid_on):'')+(r.data.method?', '+r.data.method:''),money(r.data.amount))});two('Total salaries paid',money(D.salPaid),true)}else P.row(['No salaries marked as paid in this period.'],[M],{color:C.MUT})}
+    }
+    if(what==='all'||what==='salaries'){
+      P.sec('Staff salaries');
+      let months=[];if(earn.period==='all')months=[...new Set(finOf('salary').map(r=>r.data.month))].sort();else{let d=parseD(D.f.slice(0,7)+'-01');const end=parseD(D.t);while(d<=end&&months.length<24){months.push(isoD(d).slice(0,7));d=new Date(d.getFullYear(),d.getMonth()+1,1)}}
+      months=months.filter(m=>m<=today().slice(0,7));
+      const staff=finOf('staff');const xs=[M,M+52,M+80,M+118,W-M];
+      P.row(['Staff','Month','Status','Paid by','Amount'],xs,{bold:true,size:8.5,color:C.MUT,right:[4],w:[50,26,36,46,30]});
+      let paidT=0,dueT=0,any=false;
+      months.forEach(m=>staff.forEach(stf=>{const r=finOf('salary').find(x=>x.data.staff_id===stf.id&&x.data.month===m);const pd=r&&r.data.status==='paid';
+        if(!pd&&stf.data.active===false)return;any=true;const amt=pd?(+r.data.amount||0):payDue(stf,m);if(pd)paidT+=amt;else dueT+=amt;
+        P.row([stf.data.name+' ('+(stf.data.role==='Other'&&stf.data.roleName?stf.data.roleName:stf.data.role)+')',MONTHS[+m.slice(5,7)-1]+' '+m.slice(0,4),pd?'Paid '+(r.data.paid_on?fmtDate(r.data.paid_on):''):'Unpaid',pd?(r.data.method||'–'):'–',money(amt)],xs,{right:[4],w:[50,26,36,46,30],size:8.5,color:pd?C.INK:C.MUT})}));
+      if(!any)P.row(['No staff salaries in this period.'],[M],{color:C.MUT});
+      else{doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);two('Total salaries paid',money(paidT),true);two('Salaries still unpaid',money(dueT))}
+    }
     if(what==='all'||what==='payments'){P.sec('Payments received');const xs=[M,M+24,M+82,M+125,W-M];D.pays.slice().reverse().forEach(x=>P.row([fmtDate(x.paid_on),patName(x.patient_id),x.method||'',x.received_by_name||'',money(x.amount)],xs,{right:[4],w:[22,56,42,40,30],size:8.5}));
       doc.setDrawColor(...C.LINE);doc.line(M,st.y-3.6,W-M,st.y-3.6);two('Total received',money(D.received),true)}
   }
@@ -2394,8 +2422,8 @@ document.addEventListener('submit',async e=>{
     if(f.id==='expForm'){const x=readExpForm();const amt=Math.round(parseFloat(x.amount)||0);
       if(!(amt>0))throw new Error('Enter the amount.');if(!x.date)throw new Error('Choose the date.');
       if(x.cat==='Materials'&&!x.item)throw new Error('Write the material name.');
-      await finSave('expense',{date:x.date,cat:x.cat,lab:x.cat==='Lab charges'?x.lab:'',item:x.item,pat:x.cat==='Lab charges'?x.pat:'',amount:amt,note:x.note});
-      earn.expForm={date:x.date,cat:x.cat};render();toast('Expense saved');return}
+      await finSave('expense',{date:x.date,cat:x.cat,lab:x.cat==='Lab charges'?x.lab:'',item:x.item,pat:x.cat==='Lab charges'?x.pat:'',amount:amt,note:x.note,method:x.method});
+      earn.expForm={date:x.date,cat:x.cat,method:x.method};render();toast('Expense saved');return}
     if(f.id==='staffForm'){const g=id=>($('#'+id)||{}).value||'';const name=g('sf-name').trim();if(!name)throw new Error('Write the name.');
       const data={name,role:g('sf-role'),roleName:g('sf-rolename').trim(),pay:g('sf-pay'),salary:Math.max(0,Math.round(parseFloat(g('sf-salary'))||0)),percent:Math.min(100,Math.max(0,parseFloat(g('sf-pct'))||0)),active:true};
       if(data.pay==='percent'&&!data.percent)throw new Error('Enter the percentage.');
@@ -2563,6 +2591,7 @@ document.addEventListener('click',async e=>{
   if(d.salpaid){earn.salForm={staff_id:d.salpaid,amount:d.amt||''};render();const i=$('#sl-amt');if(i)i.focus();return}
   if(d.act==='salCancel'){earn.salForm=null;render();return}
   if(d.paydent){const st=finOf('staff').find(x=>x.id===d.paydent);if(!st)return;earn.tab='staff';earn.salForm={staff_id:st.id,amount:payDue(st,(earn.anchor||today()).slice(0,7))};render();const i=$('#sl-amt');if(i)i.focus();return}
+  if(d.expslip){try{await expenseVoucher(d.expslip)}catch(err){toast(friendly(err))}return}
   if(d.salslip){try{await salarySlip(d.salslip)}catch(err){toast(friendly(err))}return}
   if(d.salunpaid){const month=(earn.anchor||today()).slice(0,7);const ex=finOf('salary').find(x=>x.data.staff_id===d.salunpaid&&x.data.month===month);
     if(ex){try{await finSave('salary',Object.assign({},ex.data,{status:'unpaid',paid_on:'',method:'',ref:''}),ex.id);render();toast('Marked as unpaid')}catch(err){toast(friendly(err))}}return}
