@@ -547,6 +547,18 @@ html[data-bg=photo] .main{background:linear-gradient(color-mix(in srgb,var(--bg)
 .salmeth .chip{cursor:pointer}
 .salmeth .chip:has(input:checked){border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:600}
 .salmeth .chip input{margin:0}
+
+/* online booking */
+.appt.online{border-color:#7fd3cb;background:linear-gradient(90deg,rgba(127,211,203,.16),var(--paper) 40%)}
+.bkwait{border-left:4px solid #26a69a}
+.bkhours{display:flex;flex-direction:column;gap:6px}
+.bkday{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.bkday input[type=time]{width:auto;min-width:110px}
+.bkday input:disabled{opacity:.45}
+.bkqr{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap;border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--paper)}
+.bkqr-code{background:#fff;padding:8px;border-radius:10px;border:1px solid var(--line);width:184px;height:184px;flex:none}
+.bkqr-code img,.bkqr-code canvas{display:block;width:168px!important;height:168px!important}
+.bklink{word-break:break-all;font-size:.9rem;font-weight:600}
 </style>
 </head>
 <body>

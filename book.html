@@ -1,0 +1,173 @@
+<!doctype html>
+<!-- Clinic Patient Records – online booking page for patients.
+     © 2026 Dr Abid Ali. All rights reserved. Proprietary – see LICENSE.txt. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0B2227">
+<title>Book an appointment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3f5f4;--paper:#fff;--ink:#18232a;--muted:#5d6b72;--line:#d9e0de;--accent:#1f5f6b;--accent-soft:#e1eeef;--alert:#b3261e;--alert-soft:#fbe9e7;--ok:#2e7d4f;--ok-soft:#e3f2e8;--head:#0B2227;--headink:#F4F6F4;--headsub:#7FD3CB}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1517;--paper:#172024;--ink:#e4ecee;--muted:#93a3a9;--line:#2a373c;--accent:#6fb8c4;--accent-soft:#1d3338;--alert:#ff8a80;--alert-soft:#3a1d1b;--ok:#7fd1a0;--ok-soft:#173023;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1517;--paper:#172024;--ink:#e4ecee;--muted:#93a3a9;--line:#2a373c;--accent:#6fb8c4;--accent-soft:#1d3338;--alert:#ff8a80;--alert-soft:#3a1d1b;--ok:#7fd1a0;--ok-soft:#173023;color-scheme:dark}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;font-size:16px;line-height:1.45}
+[hidden]{display:none!important}
+header{background:var(--head);color:var(--headink);padding:calc(22px + env(safe-area-inset-top,0px)) 16px 26px;text-align:center}
+header .logo{display:inline-block;background:#fff;border-radius:12px;padding:6px 10px;margin-bottom:10px}
+header .logo img{display:block;max-height:52px;max-width:180px}
+header h1{font-family:Fraunces,Georgia,serif;font-weight:600;font-size:1.6rem;margin:0;line-height:1.15}
+header p{margin:6px 0 0;color:var(--headsub);font-size:.9rem}
+main{max-width:560px;margin:-14px auto 0;padding:0 16px calc(40px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:14px}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px}
+h2{font-size:1.05rem;margin:0;font-weight:600}
+.step{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:.85rem;margin-right:8px}
+.muted{color:var(--muted)}.small{font-size:.85rem}
+.days{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
+.day{flex:none;scroll-snap-align:start;min-width:66px;border:1px solid var(--line);background:var(--paper);border-radius:12px;padding:8px 6px;text-align:center;cursor:pointer;color:var(--ink);font:inherit}
+.day b{display:block;font-size:1.25rem;line-height:1.1}
+.day span{display:block;font-size:.75rem;color:var(--muted)}
+.day[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.day[aria-pressed="true"] span{color:#e1eeef}
+.day:disabled{opacity:.4;cursor:default}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px}
+.slot{border:1px solid var(--line);background:var(--paper);border-radius:10px;min-height:44px;font:inherit;font-weight:600;color:var(--accent);cursor:pointer;font-variant-numeric:tabular-nums}
+.slot[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+label{display:flex;flex-direction:column;gap:4px;font-size:.88rem;color:var(--muted)}
+input,textarea{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:11px 12px;min-height:46px;width:100%}
+input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.btn{border:0;background:var(--accent);color:#fff;border-radius:12px;min-height:50px;font:inherit;font-weight:600;font-size:1.02rem;cursor:pointer;padding:0 18px}
+.btn:disabled{opacity:.55}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
+.chosen{background:var(--accent-soft);border-radius:12px;padding:10px 12px;font-weight:600}
+.msg{border-radius:12px;padding:12px;font-size:.92rem}
+.msg.err{background:var(--alert-soft);color:var(--alert)}
+.done{text-align:center;align-items:center}
+.done .tick{width:64px;height:64px;border-radius:50%;background:var(--ok-soft);color:var(--ok);display:flex;align-items:center;justify-content:center}
+.done h2{font-family:Fraunces,Georgia,serif;font-size:1.5rem}
+.when{font-size:1.15rem;font-weight:600}
+.foot{text-align:center;font-size:.75rem;color:var(--muted)}
+.foot a{color:inherit}
+.spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;margin:20px auto}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header><div id="logo" class="logo" hidden><img alt="Clinic logo"></div><h1 id="cname">Book an appointment</h1><p id="csub">Choose a day and a free time</p></header>
+<main id="main"><div class="card"><div class="spin" aria-label="Loading"></div></div></main>
+<p class="foot">Clinic Patient Records · © 2026 Dr Abid Ali</p>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+(function(){
+'use strict';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const main=$('#main');
+const code=(new URLSearchParams(location.search).get('c')||'').trim();
+const DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DNL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const pad=n=>String(n).padStart(2,'0');
+let notice='',sb,info,cfg,days=[],selDay=null,selSlot=null,busy=[];
+
+function fail(t){main.innerHTML=`<div class="card"><div class="msg err">${esc(t)}</div></div>`}
+if(!code){fail('This booking link is not complete. Please scan the clinic\'s QR code again.');return}
+const C=window.CLINIC_CONFIG;
+if(!C||!window.supabase||/PASTE/.test(C.SUPABASE_URL||'')){fail('Online booking is not available right now. Please call the clinic.');return}
+sb=window.supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+
+// clinic local time helpers: tz = minutes ahead of UTC (Pakistan = 300)
+const tzm=()=>+(cfg&&cfg.tz!=null?cfg.tz:300);
+const localNow=()=>new Date(Date.now()+tzm()*60000); // read with getUTC*
+const toUTC=(ymd,hm)=>{const [y,m,d]=ymd.split('-').map(Number),[h,mi]=hm.split(':').map(Number);return new Date(Date.UTC(y,m-1,d,h,mi)-tzm()*60000)};
+const ymdOf=dt=>dt.getUTCFullYear()+'-'+pad(dt.getUTCMonth()+1)+'-'+pad(dt.getUTCDate());
+const mins=hm=>{const [h,m]=hm.split(':').map(Number);return h*60+m};
+const hm=n=>pad(Math.floor(n/60))+':'+pad(n%60);
+const nice=n=>{const h=Math.floor(n/60),m=n%60;return ((h+11)%12+1)+':'+pad(m)+(h<12?' am':' pm')};
+
+async function load(){
+  const ln=localNow();const from=ymdOf(ln);const to=ymdOf(new Date(ln.getTime()+61*864e5));
+  const {data,error}=await sb.rpc('public_booking_info',{p_code:code,p_from:from,p_to:to});
+  if(error)throw error;
+  if(!data||!data.ok){fail('Online booking is switched off for this clinic at the moment. Please call the clinic to book.');return false}
+  info=data;cfg=data.booking||{};busy=(data.busy||[]).map(([s,d])=>{const t=new Date(s).getTime();return [t,t+(+d||30)*60000]});
+  return true;
+}
+function buildDays(){
+  const ln=localNow();const n=Math.max(1,Math.min(60,+cfg.days||30));const off=new Set(cfg.off||[]);days=[];
+  for(let i=0;i<=n;i++){const dt=new Date(Date.UTC(ln.getUTCFullYear(),ln.getUTCMonth(),ln.getUTCDate()+i));const ymd=ymdOf(dt);const h=(cfg.hours||{})[String(dt.getUTCDay())];
+    if(!h||off.has(ymd))continue;const s=slotsFor(ymd,h);if(s.length)days.push({ymd,dt,slots:s})}
+}
+function slotsFor(ymd,h){
+  const slot=Math.max(10,Math.min(120,+cfg.slot||30)),chairs=Math.max(1,+cfg.chairs||1),earliest=Date.now()+30*60000,out=[];
+  for(let m=mins(h[0]);m+slot<=mins(h[1]);m+=slot){const st=toUTC(ymd,hm(m)).getTime(),en=st+slot*60000;if(st<earliest)continue;
+    const used=busy.filter(([a,b])=>a<en&&b>st).length;if(used<chairs)out.push({m,iso:new Date(st).toISOString()})}
+  return out;
+}
+function header(){
+  $('#cname').textContent=info.name||'Book an appointment';document.title='Book – '+(info.name||'appointment');
+  $('#csub').textContent=[info.address,info.phone].filter(Boolean).join(' · ')||'Choose a day and a free time';
+  if(info.logo&&/^data:image\/(png|jpe?g|webp);base64,/.test(info.logo)){$('#logo img').src=info.logo;$('#logo').hidden=false}
+}
+function render(){
+  if(!days.length){main.innerHTML=`<div class="card"><h2>No free times right now</h2><p class="muted" style="margin:0">All times are booked. Please call the clinic${info.phone?' on <a href="tel:'+esc(info.phone)+'">'+esc(info.phone)+'</a>':''}.</p></div>`;return}
+  if(!selDay||!days.find(d=>d.ymd===selDay))selDay=days[0].ymd;
+  const d=days.find(x=>x.ymd===selDay);
+  main.innerHTML=`${notice?`<div class="msg err">${esc(notice)}</div>`:''}<div class="card"><h2><span class="step">1</span>Choose a day</h2>
+    <div class="days" role="group" aria-label="Days">${days.map(x=>`<button class="day" data-day="${x.ymd}" aria-pressed="${x.ymd===selDay}"><span>${DN[x.dt.getUTCDay()]}</span><b>${x.dt.getUTCDate()}</b><span>${MN[x.dt.getUTCMonth()]}</span></button>`).join('')}</div></div>
+  <div class="card"><h2><span class="step">2</span>Choose a time</h2><p class="small muted" style="margin:-4px 0 0">${DNL[d.dt.getUTCDay()]}, ${d.dt.getUTCDate()} ${MN[d.dt.getUTCMonth()]} · Pakistan time</p>
+    <div class="slots" role="group" aria-label="Free times">${d.slots.map(s=>`<button class="slot" data-slot="${s.iso}" aria-pressed="${s.iso===selSlot}">${nice(s.m)}</button>`).join('')}</div></div>
+  <form class="card" id="f" ${selSlot?'':'hidden'}><h2><span class="step">3</span>Your details</h2>
+    <div class="chosen" id="chosen"></div>
+    <label>Full name<input id="nm" autocomplete="name" required maxlength="80" placeholder="e.g. Ayesha Khan"></label>
+    <label>Mobile number<input id="ph" type="tel" inputmode="tel" autocomplete="tel" required maxlength="18" placeholder="03xx xxxxxxx"></label>
+    <label>Reason (optional)<textarea id="rs" rows="2" maxlength="200" placeholder="e.g. tooth pain, check-up, Botox consultation"></textarea></label>
+    <div id="err" class="msg err" hidden></div>
+    <button class="btn" type="submit" id="go">Book this time</button>
+    <p class="small muted" style="margin:0">The clinic will see your booking at once and may call you to confirm.</p></form>`;
+  showChosen();
+}
+function showChosen(){const el=$('#chosen');if(!el||!selSlot)return;el.textContent=whenText(selSlot)}
+function whenText(iso){const t=new Date(new Date(iso).getTime()+tzm()*60000);return DNL[t.getUTCDay()]+', '+t.getUTCDate()+' '+MN[t.getUTCMonth()]+' '+t.getUTCFullYear()+' at '+nice(t.getUTCHours()*60+t.getUTCMinutes())}
+
+main.addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.day){notice='';selDay=b.dataset.day;selSlot=null;render();return}
+  if(b.dataset.slot){notice='';selSlot=b.dataset.slot;const keep={nm:$('#nm')&&$('#nm').value,ph:$('#ph')&&$('#ph').value,rs:$('#rs')&&$('#rs').value};render();
+    if(keep.nm)$('#nm').value=keep.nm;if(keep.ph)$('#ph').value=keep.ph;if(keep.rs)$('#rs').value=keep.rs;$('#f').scrollIntoView({behavior:'smooth',block:'start'});return}
+  if(b.id==='again'){location.reload()}
+});
+main.addEventListener('submit',async e=>{
+  e.preventDefault();const err=$('#err'),go=$('#go');err.hidden=true;
+  const name=$('#nm').value.trim(),phone=$('#ph').value.trim(),reason=$('#rs').value.trim();
+  const digits=phone.replace(/[^0-9]/g,'');
+  if(name.length<2){err.textContent='Please write your full name.';err.hidden=false;return}
+  if(digits.length<10||digits.length>15){err.textContent='Please write a valid mobile number, e.g. 0300 1234567.';err.hidden=false;return}
+  go.disabled=true;go.textContent='Booking…';
+  try{
+    const {data,error}=await sb.rpc('public_book',{p_code:code,p_start:selSlot,p_name:name,p_phone:phone,p_reason:reason||null});
+    if(error)throw error;
+    if(data&&data.ok===false)throw new Error(data.error||'Booking failed');
+    main.innerHTML=`<div class="card done"><div class="tick"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></div>
+      <h2>You are booked</h2><p class="when" style="margin:0">${esc(whenText(selSlot))}</p><p class="muted" style="margin:0">${esc(info.name||'')}${info.address?'<br>'+esc(info.address):''}</p>
+      <p class="small muted" style="margin:0">Please arrive 10 minutes early. If you cannot come, please call the clinic${info.phone?' on <a href="tel:'+esc(info.phone)+'">'+esc(info.phone)+'</a>':''}.</p>
+      <p class="small muted" style="margin:0">Take a screenshot of this page to remember your time.</p></div>`;
+    window.scrollTo(0,0);
+  }catch(x){
+    const m=String((x&&x.message)||x).replace(/^.*?:\s*(?=[A-Z])/,'');
+    err.textContent=/fetch|network/i.test(m)?'No internet connection. Please try again.':m;err.hidden=false;go.disabled=false;go.textContent='Book this time';
+    if(/taken|choose|later|closed|outside/i.test(m)){try{await load();buildDays();selSlot=null;notice=m+' Please choose another time.';render();window.scrollTo(0,0)}catch(_){}}
+  }
+});
+
+(async()=>{try{if(await load()){header();buildDays();render()}}catch(e){console.error(e);fail(/fetch|network/i.test(String(e&&e.message))?'No internet connection. Please check your connection and reload.':'The booking page could not load. Please call the clinic.')}})();
+})();
+</script>
+</body>
+</html>

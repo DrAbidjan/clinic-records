@@ -7,7 +7,7 @@
 const CONFIG=window.CLINIC_CONFIG||{SUPABASE_URL:'',SUPABASE_ANON_KEY:''};
 const LOCAL=!!window.__LOCAL_DB;
 /* Seller details shown on the Activation screen. Fill these in (keep the quote marks). */
-const APP_VERSION='14 Oct 2026 · separate prints, expense vouchers';
+const APP_VERSION='14 Oct 2026 · online booking with QR';
 const SELLER={name:'',whatsapp:'03113124533',price:'Rs 25,000'};
 
 const $=s=>document.querySelector(s);
@@ -330,6 +330,9 @@ function subscribe(){
     if(view.screen==='appts'||(view.screen==='patient'&&view.tab==='appts'))refreshAppts();
   }).on('postgres_changes',{event:'*',schema:'public',table:'payments',filter:'clinic_id=eq.'+clinic.id},()=>{
     if(view.screen==='patient'&&view.tab==='pay'&&view.pid)loadPayments(view.pid).then(()=>softRender()).catch(()=>{});
+  }).on('postgres_changes',{event:'*',schema:'public',table:'online_bookings',filter:'clinic_id=eq.'+clinic.id},pl=>{
+    const b=pl.new;loadBookings(view.day||today()).then(()=>softRender());
+    if(pl.eventType==='INSERT'&&b){Sound.play('arrival');const t=$('#toast');t.textContent='New online booking: '+b.name+' – '+fmtDate(dayOf(b.starts_at))+' at '+hhmm(b.starts_at);t.className='toast success';t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,7000)}
   }).on('postgres_changes',{event:'INSERT',schema:'public',table:'messages',filter:'clinic_id=eq.'+clinic.id},pl=>{
     const m=pl.new;if(!m||msgs.some(x=>x.id===m.id))return;msgs.push(m);
     if(forMe(m)&&m.sender!==user.id){Sound.play(m.kind==='arrived'?'arrival':'message');
@@ -382,7 +385,7 @@ async function openClinic(m){
   if(dirty.size)await flush();
   clinic=m.clinics;me={user_id:user.id,name:m.name,role:m.role,pmdc:m.pmdc||''};lsSet('clinicId',clinic.id);
   view.screen='loading';render();
-  try{db={patients:[]};await Promise.all([loadPatients(),loadTeam(),loadBranding()]);}
+  try{db={patients:[]};await Promise.all([loadPatients(),loadTeam(),loadBranding(),loadBookingCfg()]);}
   catch(e){view.screen='error';view.msg={t:'err',m:friendly(e)};render();return}
   subscribe();
   setTimeout(prepareDaily,1500);startAttendance();loadMessages().then(()=>{const n=unreadCount();if(n){render();setTimeout(()=>toast('You have '+n+' new message'+(n>1?'s':'')+' – open Messages'),400)}});
@@ -783,6 +786,7 @@ async function loadDay(day){
   const s=new Date(day+'T00:00:00'),e=new Date(s);e.setDate(e.getDate()+1);
   const {data,error}=await sb.from('appointments').select('*').eq('clinic_id',clinic.id).gte('starts_at',s.toISOString()).lt('starts_at',e.toISOString()).order('starts_at');
   if(error)throw error;apptsDay=data||[];
+  await loadBookings(day);
 }
 let monthCounts={},monthLoaded='';
 async function loadMonth(m){
@@ -875,6 +879,100 @@ function apptCard(a,showPatient){
     </div>
   </div>`;
 }
+/* ---- Online booking (online version): patients book a free time from the clinic's QR code / link ---- */
+let booking={cfg:null,code:null,err:'',day:[],waiting:[]};
+const BK_DAYS=[[1,'Monday'],[2,'Tuesday'],[3,'Wednesday'],[4,'Thursday'],[5,'Friday'],[6,'Saturday'],[0,'Sunday']];
+const BK_DEFAULT={enabled:false,slot:30,chairs:1,days:30,tz:300,hours:{1:['09:00','17:00'],2:['09:00','17:00'],3:['09:00','17:00'],4:['09:00','17:00'],5:['09:00','17:00'],6:['10:00','14:00']}};
+const bookingLink=()=>booking.code?location.origin+location.pathname.replace(/[^/]*$/,'')+'book.html?c='+encodeURIComponent(booking.code):'';
+async function loadBookingCfg(){
+  if(LOCAL||!clinic)return;
+  try{const {data,error}=await sb.from('clinics').select('booking,booking_code').eq('id',clinic.id).single();if(error)throw error;
+    booking.cfg=Object.assign({},BK_DEFAULT,data.booking||{});booking.code=data.booking_code||null;booking.err='';await loadBookings(today())}
+  catch(e){booking.err=/booking|column|schema cache/i.test(e.message||'')?'needsql':friendly(e)}
+}
+async function loadBookings(day){
+  if(LOCAL||booking.err||!clinic)return;
+  try{const {data,error}=await sb.from('online_bookings').select('*').eq('clinic_id',clinic.id).eq('status','new').order('starts_at');if(error)throw error;
+    const now=Date.now()-36e5;booking.waiting=(data||[]).filter(b=>new Date(b.starts_at).getTime()>now);
+    booking.day=booking.waiting.filter(b=>dayOf(b.starts_at)===day)}catch(e){}
+}
+function bookingCard(b){
+  const wa=String(b.phone).replace(/[^0-9]/g,'').replace(/^0/,'92');
+  return `<div class="appt online"><div class="tm"><b>${hhmm(b.starts_at)}</b><span>${fmtDate(dayOf(b.starts_at))}</span></div>
+    <div class="ai"><div class="row" style="gap:8px"><b>${esc(b.name)}</b><span class="pill info">Online booking</span></div>
+      <div class="small muted">${esc(b.phone)}${b.reason?' · '+esc(b.reason):''} · ${b.duration} min</div>
+      <div class="row">${readOnly()?'':`<button class="btn small primary" data-bkaccept="${b.id}">Accept – add to appointments</button><button class="btn small" data-bkdecline="${b.id}">Decline</button>`}
+        <a class="btn small" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a><a class="btn small" href="tel:${esc(b.phone)}">Call</a></div></div></div>`;
+}
+function bookingWaitingPanel(){
+  if(LOCAL||!booking.waiting.length)return '';
+  return `<section class="panel bkwait"><div class="row"><h3 style="margin:0">Online bookings waiting</h3><span class="pill warn">${booking.waiting.length}</span><span class="spacer"></span><span class="small muted">Booked by patients from your QR code</span></div>
+    <div class="appts">${booking.waiting.map(bookingCard).join('')}</div></section>`;
+}
+async function acceptBooking(id){
+  const b=booking.waiting.find(x=>x.id===id);if(!b)return;
+  const digits=s=>String(s||'').replace(/[^0-9]/g,'').slice(-10);
+  let p=db.patients.find(x=>!isAes(x)&&digits(x.phone)&&digits(x.phone)===digits(b.phone))||db.patients.find(x=>digits(x.phone)&&digits(x.phone)===digits(b.phone));
+  let created=false;
+  if(!p){p=blankPatient();const parts=String(b.name).trim().split(/\s+/);p.first=parts.shift()||b.name;p.last=parts.join(' ');p.phone=b.phone;
+    p.notes.push({id:uid(),date:today(),title:'Online booking',by:me.name,text:'Booked online for '+fmtDate(dayOf(b.starts_at))+' at '+hhmm(b.starts_at)+(b.reason?'. Reason: '+b.reason:'')+'.'});
+    db.patients.push(p);markDirty(p.id);created=true}
+  if(dirty.size)await flush();
+  const {data,error}=await sb.from('appointments').insert({clinic_id:clinic.id,patient_id:p.id,starts_at:b.starts_at,duration:b.duration,reason:b.reason?('Online: '+b.reason):'Online booking',note:'Booked online by the patient',dentist_id:null}).select();
+  if(error)throw error;const ap=Array.isArray(data)?data[0]:data;
+  const r=await sb.from('online_bookings').update({status:'accepted',appointment_id:ap&&ap.id}).eq('id',id);if(r.error)throw r.error;
+  booking.waiting=booking.waiting.filter(x=>x.id!==id);booking.day=booking.day.filter(x=>x.id!==id);
+  toast((created?'New patient file made for ':'Added to ')+b.name+' – '+fmtDate(dayOf(b.starts_at))+' '+hhmm(b.starts_at));
+}
+function bookingSettingsPanel(){
+  if(!isAdmin())return '';
+  if(LOCAL)return `<section class="panel"><h3>Online booking</h3><p class="small muted" style="margin:0">Patients can book online only in the online version of the app, because their phones must reach your records over the internet.</p></section>`;
+  if(booking.err==='needsql')return `<section class="panel"><h3>Online booking</h3><div class="msg warn">This needs one small database update. Open <b>Supabase → SQL Editor</b>, paste <b>supabase-update-oct2026.sql</b> and press <b>Run</b>, then reload.</div></section>`;
+  if(!booking.cfg)return `<section class="panel"><h3>Online booking</h3><p class="small muted">Loading…</p></section>`;
+  const c=booking.cfg,link=bookingLink();
+  return `<section class="panel"><div class="row"><h3 style="margin:0">Online booking</h3><span class="spacer"></span><span class="pill ${c.enabled?'ok':'warn'}">${c.enabled?'On – patients can book':'Off'}</span></div>
+    <p class="small muted" style="margin:0">Patients scan your QR code (or open the link), pick a free time and write their name and mobile. The booking appears in Appointments at once, with a sound. You accept it with one tap.</p>
+    <form id="bookingForm" style="display:flex;flex-direction:column;gap:10px">
+      <label class="row small" style="gap:10px"><input type="checkbox" id="bk-on" ${c.enabled?'checked':''} style="width:22px;height:22px"> <b>Allow online booking</b></label>
+      <div class="grid3">
+        <label class="f"><span>Length of one booking</span><select id="bk-slot">${[15,20,30,45,60].map(n=>`<option value="${n}" ${+c.slot===n?'selected':''}>${n} minutes</option>`).join('')}</select></label>
+        <label class="f"><span>Patients at the same time</span><select id="bk-chairs">${[1,2,3,4,5].map(n=>`<option value="${n}" ${+c.chairs===n?'selected':''}>${n} (${n===1?'one chair':n+' chairs / dentists'})</option>`).join('')}</select></label>
+        <label class="f"><span>Patients can book up to</span><select id="bk-days">${[7,14,30,60].map(n=>`<option value="${n}" ${+c.days===n?'selected':''}>${n} days ahead</option>`).join('')}</select></label>
+      </div>
+      <div class="bkhours">${BK_DAYS.map(([d,l])=>{const h=(c.hours||{})[d];return `<div class="bkday"><label class="row small" style="gap:8px;min-width:140px"><input type="checkbox" data-bkopen="${d}" ${h?'checked':''} style="width:20px;height:20px"> ${l}</label>
+        <input type="time" id="bk-from-${d}" value="${h?h[0]:'09:00'}" ${h?'':'disabled'} aria-label="${l} opens"><span class="small muted">to</span><input type="time" id="bk-to-${d}" value="${h?h[1]:'17:00'}" ${h?'':'disabled'} aria-label="${l} closes"></div>`}).join('')}</div>
+      <label class="f"><span>Closed on these dates (holidays) – e.g. 2026-12-25, 2027-01-01</span><input type="text" id="bk-off" value="${esc((c.off||[]).join(', '))}" placeholder="YYYY-MM-DD, YYYY-MM-DD"></label>
+      <p class="small muted" style="margin:0">Times are Pakistan time. Existing appointments and bookings are never offered again.</p>
+      <div class="row"><button class="btn primary" type="submit">Save booking settings</button></div>
+    </form>
+    ${link?`<div class="bkqr"><div id="bkQr" class="bkqr-code" aria-label="QR code for online booking"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:0"><b>Your booking QR code</b><a class="bklink" href="${esc(link)}" target="_blank" rel="noopener">${esc(link)}</a>
+      <div class="row"><button class="btn small" data-act="bkCopy">Copy link</button><button class="btn small" data-act="bkShare">Share</button><button class="btn small primary" data-act="bkPoster">${icon('doc')} Print QR poster</button><button class="btn small" data-act="bkNewCode">New code</button></div>
+      <p class="small muted" style="margin:0">Print the poster for your reception, or post the link on WhatsApp, Facebook or Google. "New code" makes the old QR stop working.</p></div></div>`:''}
+  </section>`;
+}
+function qrInto(el,text,size){return new Promise(res=>{const go=()=>{try{el.innerHTML='';new window.QRCode(el,{text,width:size,height:size,colorDark:'#0B2227',colorLight:'#ffffff',correctLevel:window.QRCode.CorrectLevel.M})}catch(e){}res()};
+  if(window.QRCode)return go();if(!qrLib)qrLib=new Promise((r,j)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';s.onload=r;s.onerror=j;document.head.appendChild(s)});qrLib.then(go,()=>res())})}
+function fillBookingQr(){const el=document.getElementById('bkQr');if(el&&!el.childElementCount&&bookingLink())qrInto(el,bookingLink(),168)}
+async function bookingPoster(){
+  if(!window.jspdf){toast('The PDF tool did not load. Check your internet and reload the page.');return}
+  const link=bookingLink();if(!link)return;const tmp=document.createElement('div');tmp.style.cssText='position:fixed;left:-9999px';document.body.appendChild(tmp);
+  await qrInto(tmp,link,600);const cv=tmp.querySelector('canvas');const img=tmp.querySelector('img');const src=cv?cv.toDataURL('image/png'):img&&img.src;tmp.remove();
+  if(!src){toast('The QR code could not be made. Check your internet and try again.');return}
+  const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'mm',format:'a4'});const W=210;
+  doc.setFillColor(11,34,39);doc.rect(0,0,W,62,'F');
+  let ty=26;if(branding.logo){try{const fm=/^data:image\/png/.test(branding.logo)?'PNG':'JPEG';const ip=doc.getImageProperties(branding.logo);const h=18,w=Math.min(50,h*ip.width/ip.height);doc.setFillColor(255,255,255);doc.roundedRect(W/2-w/2-3,8,w+6,h+4,3,3,'F');doc.addImage(branding.logo,fm,W/2-w/2,10,w,h);ty=40}catch(e){}}
+  doc.setTextColor(244,246,244);doc.setFont('helvetica','bold');doc.setFontSize(24);doc.text(String(clinic.name).replace(/[^\x20-\x7E -ÿ]/g,''),W/2,ty,{align:'center'});
+  doc.setFont('helvetica','normal');doc.setFontSize(12);doc.setTextColor(127,211,203);const sub=[clinic.address,clinic.phone].filter(Boolean).join('  ·  ');if(sub)doc.text(sub.replace(/[^\x20-\x7E -ÿ]/g,''),W/2,ty+9,{align:'center'});
+  doc.setTextColor(24,35,42);doc.setFont('helvetica','bold');doc.setFontSize(30);doc.text('Book your appointment',W/2,86,{align:'center'});
+  doc.setFont('helvetica','normal');doc.setFontSize(14);doc.setTextColor(93,107,114);doc.text('Scan the code with your phone camera and choose a free time',W/2,96,{align:'center'});
+  doc.addImage(src,'PNG',W/2-45,106,90,90);doc.setDrawColor(200,209,207);doc.roundedRect(W/2-50,101,100,100,4,4);
+  doc.setFontSize(11);doc.setTextColor(31,95,107);const ll=doc.splitTextToSize(link,170);doc.text(ll,W/2,214,{align:'center'});
+  doc.setFontSize(12);doc.setTextColor(93,107,114);doc.text(['1. Open the camera and point it at the code','2. Choose a day and a free time','3. Write your name and mobile number – done!'],W/2-55,236);
+  doc.setFontSize(8);doc.text('Clinic Patient Records',W/2,288,{align:'center'});
+  await deliverFile(doc.output('blob'),('Booking_QR_'+clinic.name+'.pdf').replace(/[^\w.\-]+/g,'_'),'save');
+}
+const newBookingCode=()=>{const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return [...crypto.getRandomValues(new Uint8Array(10))].map(x=>a[x%a.length]).join('')};
 function apptsView(){
   const day=view.day||today();
   const act=apptsDay.filter(a=>a.status!=='cancelled');
@@ -886,6 +984,7 @@ function apptsView(){
     <button class="btn small desk-hide" data-act="settings">Clinic & account</button>
   </header>
   ${homeNav('appts')}
+  ${bookingWaitingPanel()}
   <div class="appts-layout">
   ${calendarHtml()}
   <section class="panel">
@@ -895,7 +994,7 @@ function apptsView(){
     <div class="row"><input type="date" id="dayPick" value="${day}" style="max-width:180px"><span class="spacer"></span>
       ${day!==today()?'<button class="btn small" data-day="'+today()+'">Today</button>':''}<button class="btn small" data-day="${shiftDay(today(),1)}">Tomorrow</button></div>
     <div class="small muted">${apptsLoading?'Loading…':act.length+' appointment'+(act.length===1?'':'s')+(need?' · '+need+' without a reminder':'')}</div>
-    ${apptsDay.length?`<div class="appts">${apptsDay.map(a=>apptCard(a,true)).join('')}</div>`:(apptsLoading?'':'<div class="empty">No appointments this day. Book one from a patient’s file, in the Appointments tab.</div>')}
+    ${apptsDay.length||booking.day.length?`<div class="appts">${[...apptsDay.map(a=>({t:a.starts_at,h:apptCard(a,true)})),...booking.day.map(b=>({t:b.starts_at,h:bookingCard(b)}))].sort((x,y)=>String(x.t).localeCompare(String(y.t))).map(x=>x.h).join('')}</div>`:(apptsLoading?'':'<div class="empty">No appointments this day. Book one from a patient’s file, in the Appointments tab.</div>')}
   </section>
   </div>
   <p class="small muted">Reminders open the SMS or WhatsApp app on this phone with the message ready. You tap Send. Change the message in Clinic & account.</p>`;
@@ -1139,6 +1238,7 @@ function render(){
   app.innerHTML=inShell?shell(ownerBar()+v()):`<div class="wrap">${v()}${['auth','onboard','newpw','recovery','config'].includes(s)?CREDIT:''}${s==='auth'?'<p class="ownerlink"><button class="linkbtn" data-act="ownerOpen">Owner access</button></p>':''}</div>`;
   if(view.screen==='msgs'){const cl=document.getElementById('chatList');if(cl)cl.scrollTop=cl.scrollHeight}
   if(document.querySelector('.credit-qr'))fillQR();
+  if(document.getElementById('bkQr'))fillBookingQr();
   const cv=document.getElementById('camVideo');if(cv&&camStream&&cv.srcObject!==camStream){cv.srcObject=camStream;cv.play().catch(()=>{})}
   if(camStream&&!(view.screen==='patient'&&view.tab==='xrays'))stopCamera();
 }
@@ -1562,7 +1662,7 @@ function shell(content){
     <nav class="side-nav">
       <button class="${active==='list'?'on':''}" data-home="list">${icon('people')}<span>Patients</span><em>${db.patients.filter(p=>!isAes(p)).length}</em></button>
       <button class="${active==='aes'?'on':''}" data-home="aes">${icon('sparkle')}<span>Aesthetics</span><em>${db.patients.filter(isAes).length}</em></button>
-      <button class="${active==='appts'?'on':''}" data-home="appts">${icon('calendar')}<span>Appointments</span></button>
+      <button class="${active==='appts'?'on':''}" data-home="appts">${icon('calendar')}<span>Appointments</span>${booking.waiting.length?`<em class="badge" title="Online bookings waiting">${booking.waiting.length}</em>`:''}</button>
       <button class="${active==='msgs'?'on':''}" data-home="msgs">${icon('chat')}<span>Messages</span>${un?`<em class="badge">${un}</em>`:''}</button>
       ${isAdmin()?`<button class="${active==='earn'?'on':''}" data-home="earn">${icon('money')}<span>Earnings</span>${earnOpen()?'':`<em class="lockmark" title="PIN protected">${icon('lock')}</em>`}</button>`:''}
       <button class="${active==='settings'?'on':''}" data-act="settings">${icon('gear')}<span>Clinic &amp; account</span></button>
@@ -1752,6 +1852,7 @@ function settingsView(){
   <h1>Clinic & account</h1>
   <p class="small muted" style="margin:-6px 0 12px">App version: <b>${APP_VERSION}</b></p>
   ${brandingPanel()}
+  ${bookingSettingsPanel()}
   ${soundsPanel()}
   ${msgHtml()}
   ${activationPanel(admin)}
@@ -2413,6 +2514,13 @@ document.addEventListener('submit',async e=>{
     if(f.id==='ownerErase'){if(!view.ownerOk||!LOCAL||OWNER_TEST)return;if(v('own-erase')!=='ERASE')throw new Error('Type ERASE in capital letters to confirm.');
       await window.__LOCAL_DB.wipeAll();try{Object.keys(localStorage).filter(k=>k.startsWith('offline:')).forEach(k=>localStorage.removeItem(k))}catch(e){}
       alert('All clinics on this device were erased. The app will start fresh.');location.href=location.pathname;return}
+    if(f.id==='bookingForm'){const hours={};for(const [d] of BK_DAYS){const on=document.querySelector('[data-bkopen="'+d+'"]');if(on&&on.checked){const a=$('#bk-from-'+d).value,z=$('#bk-to-'+d).value;if(!a||!z||a>=z)throw new Error('Check the opening hours – closing time must be after opening time.');hours[d]=[a,z]}}
+      const off=String($('#bk-off').value||'').split(/[,\s]+/).map(x=>x.trim()).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x));
+      const cfg={enabled:$('#bk-on').checked,slot:+$('#bk-slot').value,chairs:+$('#bk-chairs').value,days:+$('#bk-days').value,tz:300,hours,off};
+      if(cfg.enabled&&!Object.keys(hours).length)throw new Error('Tick at least one opening day.');
+      const upd={booking:cfg};if(!booking.code)upd.booking_code=newBookingCode();
+      const {error}=await sb.from('clinics').update(upd).eq('id',clinic.id);if(error)throw error;
+      booking.cfg=Object.assign({},BK_DEFAULT,cfg);if(upd.booking_code)booking.code=upd.booking_code;render();toast(cfg.enabled?'Online booking is on – print your QR poster':'Online booking saved (off)');return}
     if(f.id==='salForm'){const sf=earn.salForm;if(!sf)return;const month=(earn.anchor||today()).slice(0,7);
       const amt=Math.max(0,Math.round(parseFloat($('#sl-amt').value)||0));if(!(amt>0))throw new Error('Enter the amount paid.');
       const method=(document.querySelector('input[name=sl-method]:checked')||{}).value||'Cash';
@@ -2574,6 +2682,13 @@ document.addEventListener('click',async e=>{
   if(d.earnper){earn.period=d.earnper;render();return}
   if(d.earnnav!==undefined){earnShift(+d.earnnav);render();return}
   if(d.act==='earnCsv'){earnCsv();return}
+  if(d.bkaccept){if(b.disabled)return;b.disabled=true;try{await acceptBooking(d.bkaccept);await refreshAppts()}catch(err){toast(friendly(err));b.disabled=false}render();return}
+  if(d.bkdecline){if(!confirm('Decline this online booking? Please tell the patient by phone or WhatsApp.'))return;const {error}=await sb.from('online_bookings').update({status:'declined'}).eq('id',d.bkdecline);if(error){toast(friendly(error));return}
+    booking.waiting=booking.waiting.filter(x=>x.id!==d.bkdecline);booking.day=booking.day.filter(x=>x.id!==d.bkdecline);render();toast('Booking declined');return}
+  if(d.act==='bkCopy'){try{await navigator.clipboard.writeText(bookingLink());toast('Link copied')}catch(e){prompt('Copy this link:',bookingLink())}return}
+  if(d.act==='bkShare'){const l=bookingLink();if(navigator.share){navigator.share({title:clinic.name+' – book an appointment',text:'Book your appointment at '+clinic.name+':',url:l}).catch(()=>{})}else window.open('https://wa.me/?text='+encodeURIComponent('Book your appointment at '+clinic.name+': '+l),'_blank');return}
+  if(d.act==='bkPoster'){try{await bookingPoster()}catch(err){toast(friendly(err))}return}
+  if(d.act==='bkNewCode'){if(!confirm('Make a new booking code? The old QR code and link will stop working.'))return;const code=newBookingCode();const {error}=await sb.from('clinics').update({booking_code:code}).eq('id',clinic.id);if(error){toast(friendly(error));return}booking.code=code;render();toast('New QR code made – print the new poster');return}
   if(d.bgset!==undefined){if(!isAdmin())return;if(d.bgset==='photo'&&!branding.bgImage){view.bgPhoto=true;render();toast('Choose a photo for the background');return}
     try{await saveBranding({bg:d.bgset});view.bgPhoto=false;render();toast('Background changed')}catch(err){toast(friendly(err))}return}
   if(d.act==='logoRemove'){try{await saveBranding({logo:''});render();toast('Logo removed')}catch(err){toast(friendly(err))}return}
@@ -2790,6 +2905,7 @@ document.addEventListener('change',async e=>{
   if(el.id==='restoreFile'&&el.files&&el.files[0]){try{const d=JSON.parse(await el.files[0].text());if(!d||d.app!=='clinic-records-local'||!d.tables)throw 0;
     view.restoreData=d;view.restoreInfo=(d.clinics||[]).join(', ')+' from '+fmtDate(String(d.exported||'').slice(0,10));view.confirm='restore';render();}catch(err){toast('That file is not a full backup from this app')}el.value='';return}
   if(el.id==='earn-print'){earn.printWhat=el.value;return}
+  if(el.dataset&&el.dataset.bkopen!==undefined){const d=el.dataset.bkopen;['bk-from-','bk-to-'].forEach(p=>{const x=$('#'+p+d);if(x)x.disabled=!el.checked});return}
   if((el.id==='brand-logo'||el.id==='brand-bg')&&el.files&&el.files[0]){const f=el.files[0];
     try{if(el.id==='brand-logo'){const png=f.type==='image/png'||f.type==='image/webp';const url=await resizeImage(f,320,png?'image/png':'image/jpeg',0.9);await saveBranding({logo:url});toast('Logo saved')}
       else{const url=await resizeImage(f,1600,'image/jpeg',0.72);await saveBranding({bg:'photo',bgImage:url});view.bgPhoto=false;toast('Background photo saved')}
